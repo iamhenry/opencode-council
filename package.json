@@ -1,6 +1,6 @@
 {
   "name": "opencode-council",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode plugin: a multi-model council tool. Fresh child sessions deliberate in parallel; a judge returns a structured decision artifact.",
   "type": "module",
   "license": "MIT",
@@ -19,8 +19,8 @@
       "import": "./src/index.ts"
     },
     "./server": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
     }
   },
   "files": ["src", "README.md", "LICENSE"],

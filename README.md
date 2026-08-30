@@ -41,7 +41,7 @@ Verified against the OpenCode **1.18.23** loader source (`packages/opencode/src/
   "plugin": [
     "github:iamhenry/opencode-council",
     // or pin a ref/tag:
-    "github:iamhenry/opencode-council#v0.1.0",
+    "github:iamhenry/opencode-council#v0.1.1",
     // or the npm shorthand / explicit git URL:
     "iamhenry/opencode-council",
     "git+https://github.com/iamhenry/opencode-council.git"
