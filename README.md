@@ -134,6 +134,22 @@ Configuration (optional): `COUNCIL_PANEL_MODELS="provider/a,provider/b,provider/
 
 Blinding is enforced in code: candidate-visible prompts and workspace names are checked against a forbidden-words list before any session spawns, and harness tests keep it that way. See `harness/`.
 
+## Capability duel (champion–challenger)
+
+Beyond the regression gate, a KISS capability harness measures whether a config change actually makes the council **better on hard development calls** — 5 capability cases (each run twice), a frozen **champion** file, and blinded A/B duels per criterion:
+
+1. **Freeze** a champion once: every case × 2 runs with the current config, artifacts sanitized (paths/sessions/uuids stripped) and written to `harness/champion.json`.
+2. **Duel**: a challenger config runs the same cases × 2; a grader sees each pair under **anonymous A/B labels** (champion position seeded-random per case run, model refs scrubbed) and picks a winner per criterion (`correctness`, `evidence`, `hidden_risks`, `simplicity`, `actionability`). Unknowns are recorded, never fabricated into wins.
+3. **Promote** only if *all* hold: every regression case passes its machine gates, challenger wins > losses across the four development duels, and the procedural **holdout** case (embedded trap, excluded from tuning summaries) does not regress.
+
+```sh
+bun run council:freeze                   # freeze current config as champion (harness/champion.json)
+bun run council:capability               # duel vs frozen champion, report → harness/last-capability.json
+bun run council:promote                  # duel + regression gates; exit 1 if promotion blocked
+```
+
+`--freeze-champion`/`--cases` flags map straight through to `bun harness/run.ts`. The champion file records the freezing council version, commit, and models; panel/judge drift vs the frozen champion is warned at duel time. All stored artifacts are sanitized; challenger model config stays in the report's `council` block.
+
 ## Development
 
 ```sh

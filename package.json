@@ -28,7 +28,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "council:eval": "bun harness/run.ts"
+    "council:eval": "bun harness/run.ts",
+    "council:capability": "bun harness/run.ts --cases capability",
+    "council:promote": "bun harness/run.ts --cases promote",
+    "council:freeze": "bun harness/run.ts --cases capability --freeze-champion"
   },
   "dependencies": {
     "zod": "4.1.8"

@@ -25,14 +25,40 @@ import type { CouncilToolArgs } from "../src/council.js"
 import type { DecisionArtifact } from "../src/artifact.js"
 import { parseConfig } from "../src/config.js"
 import { createSdkCouncilClient } from "../src/opencode.js"
-import { assertBlind, assertCasesBlind, scrubModelRefs } from "./blind.js"
+import { assertBlind, scrubModelRefs } from "./blind.js"
 import { CASES, assertCasesBlind as checkCases } from "./cases.js"
+import { CAPABILITY_CASES, type CapabilityCase } from "./capability.js"
+import {
+  DUEL_CRITERIA,
+  championSlot,
+  duelFromGrader,
+  duelGraderSystemPrompt,
+  duelGraderUserPrompt,
+  excludeHoldout,
+  holdoutCaseId,
+  parseDuel,
+  promotionGate,
+  sanitizeCaseResult,
+  sanitizeText,
+  tallyAll,
+  tallyCase,
+  type ChampionFile,
+  type ChampionPair,
+  type DuelCriterionId,
+  type DuelGrade,
+  type DuelTally,
+  type PromotionGate,
+} from "./duel.js"
 import { graderSystemPrompt, graderUserPrompt, parseGrades, RUBRIC } from "./rubric.js"
+
+const DUEL_CRITERIA_IDS = DUEL_CRITERIA.map((c) => c.id) as DuelCriterionId[]
 
 const HARNESS_ROOT = path.dirname(fileURLToPath(new URL(import.meta.url)))
 const PKG = JSON.parse(readFileSync(path.join(HARNESS_ROOT, "..", "package.json"), "utf8"))
 const DEFAULT_OUT = path.join(HARNESS_ROOT, "last-run.json")
 const DEFAULT_BASELINE = path.join(HARNESS_ROOT, "baseline.json")
+const DEFAULT_CHAMPION = path.join(HARNESS_ROOT, "champion.json")
+const CAP_RUNS_PER_CASE = 2
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-covered in test/harness.test.ts)
@@ -291,10 +317,6 @@ async function collectEvidence(
   }
 }
 
-function gradeOf(grade: CaseResult["grade"], note: string): CaseResult["grade"] {
-  return grade ? { ...grade, note: grade.note || note } : null
-}
-
 export async function main(): Promise<number> {
   const argv = process.argv.slice(2)
   const outArg = argv.includes("--out") ? argv[argv.indexOf("--out") + 1]! : DEFAULT_OUT
@@ -425,8 +447,9 @@ export async function main(): Promise<number> {
           },
           query: { directory: process.cwd() },
         })
-        if (gres.error) {
-          const msg = typeof gres.error === "string" ? gres.error : JSON.stringify(gres.error).slice(0, 500)
+        const gerr = (gres as { error?: unknown }).error
+        if (gerr) {
+          const msg = typeof gerr === "string" ? gerr : JSON.stringify(gerr).slice(0, 500)
           for (const c of cases) c.gradeError = `Grader prompt failed: ${msg}`
           console.error(`Grader prompt failed: ${msg}`)
         } else {
@@ -454,7 +477,7 @@ export async function main(): Promise<number> {
                 crit[rc.id] = { score: cg?.score ?? 0, note: cg?.note ?? "" }
                 total += cg?.score ?? 0
               }
-              c.grade = gradeOf({ total, maxTotal: RUBRIC.length * 2, criteria: crit }, g.note)
+              c.grade = { total, maxTotal: RUBRIC.length * 2, criteria: crit, note: g.note }
             }
           }
         }
@@ -521,5 +544,293 @@ function pickGraderModel(
 }
 
 if (import.meta.main) {
-  process.exitCode = await main()
+  // KISS router: the champion-challenger modes pass --cases capability|promote.
+  if (selectCasesMode(process.argv.slice(2)) !== "regression") {
+    process.exitCode = await runCapabilityDuel(process.argv.slice(2))
+  } else {
+    process.exitCode = await main()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capability / champion-challenger duel (KISS 80/20)
+//
+// Separate from the regression harness above: same live plumbing, different
+// case set, two runs per case, frozen champion artifacts, blinded A/B duel
+// grading, and a promotion gate. See harness/capability.ts and duel.ts.
+
+export type CapabilityMode = "regression" | "capability" | "promote"
+
+/** Pure arg selection so the mode gate is unit-testable. */
+export function selectCasesMode(argv: string[]): CapabilityMode {
+  const i = argv.indexOf("--cases")
+  const v = i === -1 ? undefined : argv[i + 1]
+  if (v === "capability" || v === "promote" || v === "regression") return v
+  return "regression"
+}
+
+function capabilityCaseResult(c: CapabilityCase, attempt: number, r: { artifact: DecisionArtifact | null; councilError: string | null; evidence: MachineChecks["sessionEvidence"] }): CaseResult {
+  return {
+    caseId: attempt === 1 ? c.caseId : `${c.caseId}#2`,
+    slug: c.slug,
+    modeRequested: c.mode,
+    question: c.question,
+    machine: {
+      artifactSchemaValid: r.artifact !== null,
+      modeUsed: r.artifact?.mode_used ?? null,
+      degradation: r.artifact?.degradation ?? null,
+      failures: r.artifact?.failures ?? (r.councilError ? [`council: ${r.councilError}`] : []),
+      councilError: r.councilError,
+      sessionEvidence: r.evidence,
+    },
+    artifact: r.artifact,
+    grade: null,
+    gradeError: null,
+  } as CaseResult
+}
+
+/**
+ * Run a capability/regression case once through the live council (shared
+ * plumbing, trimmed to what the duel and gates need).
+ */
+async function runCapabilityOnce(
+  sdk: ReturnType<typeof createOpencodeClient>,
+  config: ReturnType<typeof parseConfig>,
+  c: CapabilityCase,
+  attempt: number,
+  workspaces: string[],
+): Promise<{ artifact: DecisionArtifact | null; councilError: string | null; evidence: MachineChecks["sessionEvidence"] }> {
+  const ws = await mkdtemp(path.join(tmpdir(), `${c.slug}-${attempt}-`))
+  workspaces.push(ws)
+  for (const [name, content] of Object.entries(c.seedFiles)) {
+    mkdirSync(path.dirname(path.join(ws, name)), { recursive: true })
+    await writeFile(path.join(ws, name), content)
+  }
+  const councilClient = createSdkCouncilClient(sdk, ws)
+  const parent = await sdk.session.create({ body: { title: `Planning — ${c.slug}` }, query: { directory: ws } })
+  const parentID = parent.data!.id
+
+  const args: CouncilToolArgs = { question: c.question, mode: c.mode, context: c.context }
+  let artifact: DecisionArtifact | null = null
+  let councilError: string | null = null
+  try {
+    const outcome = await runCouncil(councilClient, config, args, parentID, AbortSignal.timeout(config.timeoutMs * 5))
+    artifact = outcome.artifact
+  } catch (err) {
+    councilError = err instanceof Error ? err.message : String(err)
+    console.error(`Council run failed: ${councilError.slice(0, 500)}`)
+  }
+  const evidence = await collectEvidence(sdk, ws, parentID)
+  return { artifact, councilError, evidence }
+}
+
+/** Live two-run capability duel / promotion run. */
+export async function runCapabilityDuel(argv: string[]): Promise<number> {
+  const mode = selectCasesMode(argv)
+  const outArg = argv.includes("--out") ? argv[argv.indexOf("--out") + 1]! : path.join(HARNESS_ROOT, "last-capability.json")
+  const championArg = argv.includes("--champion") ? argv[argv.indexOf("--champion") + 1]! : DEFAULT_CHAMPION
+  const freezeChampion = argv.includes("--freeze-champion")
+
+  // Blinding gate before any live work (candidate-visible strings only).
+  checkCases(assertBlind)
+  for (const c of CAPABILITY_CASES) {
+    assertBlind(c.slug, `capability case ${c.caseId} slug`)
+    assertBlind(c.question, `capability case ${c.caseId} question`)
+    if (c.context) assertBlind(c.context, `capability case ${c.caseId} context`)
+    for (const [name, content] of Object.entries(c.seedFiles)) {
+      assertBlind(name, `capability case ${c.caseId} file name`)
+      assertBlind(content, `capability case ${c.caseId} file ${name}`)
+    }
+  }
+
+  const config = parseConfig({
+    panelModels: envModels(),
+    timeoutMs: process.env.COUNCIL_TIMEOUT_MS ? Number(process.env.COUNCIL_TIMEOUT_MS) : undefined,
+  })
+
+  const commit = currentCommit()
+  const workspaces: string[] = []
+  console.log(`Spawning OpenCode server (capability ${mode}${freezeChampion ? " freeze" : ""}, council v${PKG.version}, commit ${commit.slice(0, 12)})…`)
+  const server = await createOpencodeServer({ port: 49152 + (process.pid % 15000), timeout: 30_000 })
+  try {
+    const sdk = createOpencodeClient({ baseUrl: server.url })
+    const available = await createSdkCouncilClient(sdk, process.cwd()).listModels()
+    if (available.length === 0) throw new Error("No authenticated providers found — run `opencode auth login` first.")
+    const graderModel = pickGraderModel(available, config.judgeModel, config.panelModels)
+    const panelRefs = available.map((r) => `${r.providerID}/${r.modelID}`)
+
+    // ---- Gather artifacts: every capability case, two runs. ----
+    const runArtifacts = new Map<string, { champion?: { artifact: DecisionArtifact; caseResult: CaseResult }; challenger?: { artifact: DecisionArtifact; caseResult: CaseResult } }>()
+
+    for (const c of CAPABILITY_CASES) {
+      console.log(`\n=== ${c.caseId}${c.holdout ? " (holdout)" : ""} (${c.slug}, mode=${c.mode}) ===`)
+      for (let attempt = 1; attempt <= CAP_RUNS_PER_CASE; attempt++) {
+        const r = await runCapabilityOnce(sdk, config, c, attempt, workspaces)
+        if (freezeChampion && !r.artifact) {
+          throw new Error(`Cannot freeze champion: ${c.caseId} attempt ${attempt} produced no decision artifact.`)
+        }
+        const caseResult = capabilityCaseResult(c, attempt, r)
+        const key = `${c.caseId}#${attempt}`
+        const entry = runArtifacts.get(key) ?? {}
+        if (freezeChampion) entry.champion = { artifact: r.artifact!, caseResult }
+        else entry.challenger = { artifact: r.artifact!, caseResult }
+        runArtifacts.set(key, entry)
+      }
+    }
+
+    if (freezeChampion) {
+      const pairs: ChampionPair[] = []
+      for (const c of CAPABILITY_CASES) {
+        for (let attempt = 1; attempt <= CAP_RUNS_PER_CASE; attempt++) {
+          const e = runArtifacts.get(`${c.caseId}#${attempt}`)!
+          pairs.push({ caseId: c.caseId, attempt, artifact: JSON.parse(sanitizeText(JSON.stringify(e.champion!.artifact))) as DecisionArtifact })
+        }
+      }
+      const championFile: ChampionFile = {
+        champion: { name: "opencode-council-capability-champion", schema: 1 },
+        council: { version: PKG.version as string, commit, models: { panel: config.panelModels, router: config.routerModel ?? "(auto)", judge: config.judgeModel } },
+        frozenAt: new Date().toISOString(),
+        pairs,
+      }
+      const championPath = path.resolve(championArg)
+      mkdirSync(path.dirname(championPath), { recursive: true })
+      writeFileSync(championPath, JSON.stringify(championFile, null, 2) + "\n")
+      console.log(`\nChampion frozen: ${championPath} (${pairs.length} pairs)`)
+      return 0
+    }
+
+    // ---- Duel grading against frozen champion. ----
+    const championPath = path.resolve(championArg)
+    if (!existsSync(championPath)) {
+      throw new Error(`No champion file at ${championPath}. Freeze one first: bun harness/run.ts --cases capability --freeze-champion`)
+    }
+    const champion = JSON.parse(readFileSync(championPath, "utf8")) as ChampionFile
+    if (champion.council.models.panel.join(",") !== config.panelModels.join(",")) {
+      console.warn(`Panel config differs from frozen champion (${champion.council.models.panel.join(",")} vs ${config.panelModels.join(",")}) — grading a different config; duel wins/losses remain valid, promotion still re-checks regression gates.`)
+    }
+    if (champion.council.models.judge !== config.judgeModel) {
+      console.warn(`Judge model drift vs champion: ${champion.council.models.judge} → ${config.judgeModel} (recorded in report).`)
+    }
+
+    const duelGrades: DuelGrade[] = []
+    const capabilityResults: CaseResult[] = []
+
+    for (const c of CAPABILITY_CASES) {
+      console.log(`\n=== duel ${c.caseId}${c.holdout ? " (holdout)" : ""} ===`)
+      for (let attempt = 1; attempt <= CAP_RUNS_PER_CASE; attempt++) {
+        const key = `${c.caseId}#${attempt}`
+        const champ = champion.pairs.find((p) => p.caseId === c.caseId && p.attempt === attempt)
+        const run = runArtifacts.get(key)!
+        if (!champ) throw new Error(`Champion file missing pair ${key}. Re-freeze the champion.`)
+        if (attempt === 1) capabilityResults.push(run.challenger!.caseResult)
+        if (!run.challenger?.artifact) {
+          console.error(`Challenger produced no artifact for ${key}; recording unknown.`)
+          duelGrades.push(duelFromGrader({ caseId: c.caseId, attempt, parsed: { label_a_scores: {}, label_b_scores: {}, verdicts: {}, note: "" }, criteria: DUEL_CRITERIA_IDS }))
+          continue
+        }
+        const slot = championSlot(c.caseId, attempt)
+        const render = (a: DecisionArtifact) => scrubModelRefs(renderDecisionForGrader(a), panelRefs)
+        const aText = slot === "A" ? render(champ.artifact) : render(run.challenger.artifact)
+        const bText = slot === "A" ? render(run.challenger.artifact) : render(champ.artifact)
+        try {
+          const gs = await sdk.session.create({ body: { title: "Duel grading" }, query: { directory: process.cwd() } })
+          const gres = await sdk.session.prompt({
+            path: { id: gs.data!.id },
+            body: {
+              parts: [{ type: "text", text: duelGraderUserPrompt({ caseId: c.caseId, question: c.question, context: c.context, a: aText, b: bText }) }],
+              system: duelGraderSystemPrompt(),
+              model: { providerID: graderModel.split("/")[0]!, modelID: graderModel.split("/").slice(1).join("/") },
+            },
+            query: { directory: process.cwd() },
+          })
+          const gerr = (gres as { error?: unknown }).error
+          if (gerr) throw new Error(typeof gerr === "string" ? gerr : JSON.stringify(gerr).slice(0, 300))
+          const gtext = (gres.data?.parts ?? []).filter((p) => (p as { type: string }).type === "text").map((p) => (p as unknown as { text: string }).text).join("\n")
+          const parsed = parseDuel(gtext)
+          if (!parsed.ok) throw new Error(parsed.error)
+          const duel = parsed.duels[0]
+          if (!duel) throw new Error("Duel grader returned no duel entries.")
+          duelGrades.push(duelFromGrader({ caseId: c.caseId, attempt, parsed: duel, criteria: DUEL_CRITERIA_IDS }))
+          console.log(`  ${key}: champion in slot ${slot}, graded`)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`  Duel grading failed for ${key}: ${msg}`)
+          duelGrades.push(duelFromGrader({ caseId: c.caseId, attempt, parsed: { label_a_scores: {}, label_b_scores: {}, verdicts: {}, note: "" }, criteria: DUEL_CRITERIA_IDS }))
+        }
+      }
+    }
+
+    const capabilityTallies: Record<string, Record<DuelCriterionId, DuelTally>> = {}
+    for (const c of CAPABILITY_CASES) {
+      capabilityTallies[c.caseId] = tallyCase(duelGrades.filter((d) => d.caseId === c.caseId))
+    }
+    const holdoutId = holdoutCaseId()
+    const developmentTallies = Object.fromEntries(Object.entries(capabilityTallies).filter(([caseId]) => caseId !== holdoutId))
+    const overall = tallyAll(developmentTallies)
+    console.log("\n=== capability tally (champion vs challenger, both runs, all criteria) ===")
+    for (const [id, t] of Object.entries(overall)) {
+      console.log(`  ${id}: W${t.wins}/L${t.losses}/T${t.ties}/U${t.unknown}`)
+    }
+    const tuningSummary = CAPABILITY_CASES.filter((c) => !c.holdout).map((c) => c.caseId)
+    console.log(`  holdout ${holdoutId} excluded from tuning summary (checked cases: ${tuningSummary.join(", ")})`)
+
+    // ---- Promotion gate (--cases promote adds regression gates). ----
+    let gate: PromotionGate | null = null
+    if (mode === "promote") {
+      console.log("\n=== regression gates (promotion requirement) ===")
+      const regressionResults = await runRegressionGates(sdk, config, workspaces)
+      gate = promotionGate({ regressionResults, capabilityTallies, holdoutCaseId: holdoutId })
+      for (const r of gate.reasons) console.error(`  BLOCK: ${r}`)
+      console.log(`Promotion: ${gate.promoted ? "PROMOTED" : "NOT PROMOTED"} (regression ${gate.regressionPass ? "pass" : "fail"}, capability ${gate.capabilityWinsMoreThanLosses ? "win>loss" : "not win>loss"}, holdout ${gate.holdoutNoRegress ? "ok" : "regressed"})`)
+    }
+
+    // ---- Report (sanitized; no session evidence, no absolute paths). ----
+    const finishedAt = new Date().toISOString()
+    const report = {
+      harness: { name: "opencode-council-capability-run", schema: 1 },
+      council: { version: PKG.version as string, commit, models: { panel: config.panelModels, router: config.routerModel ?? "(auto)", judge: config.judgeModel, grader: graderModel } },
+      run: { finishedAt, mode },
+      capability: {
+        duelCriteria: DUEL_CRITERIA.map((x) => x.id),
+        tallyByCase: developmentTallies,
+        tallyOverall: overall,
+        holdoutCaseId: holdoutId,
+        holdoutExcludedFromTuning: true,
+        promotion: gate,
+      },
+      cases: excludeHoldout(capabilityResults, holdoutId).map(sanitizeCaseResult),
+    }
+    const outPath = path.resolve(outArg)
+    mkdirSync(path.dirname(outPath), { recursive: true })
+    writeFileSync(outPath, sanitizeText(JSON.stringify(report, null, 2)) + "\n")
+    console.log(`\nCapability report written: ${outPath}`)
+    return gate && !gate.promoted ? 1 : 0
+  } finally {
+    await Promise.allSettled(workspaces.map((w) => rm(w, { recursive: true, force: true })))
+    server.close()
+  }
+}
+
+/** Regression-gate input for promotion: the original 3 cases, machine checks only. */
+async function runRegressionGates(
+  sdk: ReturnType<typeof createOpencodeClient>,
+  config: ReturnType<typeof parseConfig>,
+  workspaces: string[],
+): Promise<{ caseId: string; modeRequested: string; machine: { artifactSchemaValid: boolean; modeUsed: string | null; degradation: string | null; failures: string[] } }[]> {
+  const out: { caseId: string; modeRequested: string; machine: { artifactSchemaValid: boolean; modeUsed: string | null; degradation: string | null; failures: string[] } }[] = []
+  for (const c of CASES) {
+    console.log(`  regression gate: ${c.caseId} (${c.mode})`)
+    const r = await runCapabilityOnce(sdk, config, { ...c }, 1, workspaces)
+    out.push({
+      caseId: c.caseId,
+      modeRequested: c.mode,
+      machine: {
+        artifactSchemaValid: r.artifact !== null,
+        modeUsed: r.artifact?.mode_used ?? null,
+        degradation: r.artifact?.degradation ?? null,
+        failures: r.artifact?.failures ?? (r.councilError ? [`council: ${r.councilError}`] : []),
+      },
+    })
+  }
+  return out
 }

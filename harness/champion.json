@@ -1,0 +1,505 @@
+{
+  "champion": {
+    "name": "opencode-council-capability-champion",
+    "schema": 1
+  },
+  "council": {
+    "version": "0.1.1",
+    "commit": "3097962e54b66725e7a1cc52616e3499643769ea",
+    "models": {
+      "panel": [
+        "openai/gpt-5.6-sol",
+        "opencode-go/kimi-k3",
+        "xai/grok-4.6"
+      ],
+      "router": "opencode-go/glm-5.3-flash",
+      "judge": "openai/gpt-5.6-sol"
+    }
+  },
+  "frozenAt": "2026-08-30T23:13:15.023Z",
+  "pairs": [
+    {
+      "caseId": "cap-migration-cutover",
+      "attempt": 1,
+      "artifact": {
+        "recommendation": "Diagnose the top slow queries first using pg_stat_statements and EXPLAIN (ANALYZE, BUFFERS). Fix obvious indexing, partition-pruning, bloat, or replica-configuration issues. If large aggregation scans remain the bottleneck, build narrowly targeted, idempotent hourly summary tables in Postgres. Do not introduce ClickHouse or Redis within this two-week window.",
+        "confidence": "High (93%). All panelists converge on diagnosis-first Postgres optimization and targeted summaries; team size, low query rate, limited time, and no ClickHouse experience strongly disfavor new infrastructure.",
+        "consensus": "All panelists reject ClickHouse and Redis for the current constraints and favor Postgres summary tables if aggregation scans are proven. They agree that query evidence must precede implementation, summaries should cover measured dashboard shapes only, and late data, backfills, correctness, and rollback require explicit handling.",
+        "disagreements": [
+          "The Architect recommends hourly summaries directly but reserves 1–2 days for diagnosis; the Skeptic rejects choosing any architecture until diagnosis proves aggregation is the bottleneck.",
+          "The Pragmatist assumes dashboards scan an 800GB events table containing JSONB, but that detail was not provided and must not drive the decision.",
+          "The Pragmatist suggests one materialized view per slow query and REFRESH CONCURRENTLY; the Architect favors incremental summaries with watermarks. Incremental updates are safer if full refreshes are expensive, but implementation should follow measured refresh cost.",
+          "The Pragmatist accepts hourly or daily summaries and excludes exact distinct counts; the other panelists leave granularity and aggregate functions open pending query requirements."
+        ],
+        "strongest_evidence": [
+          "Skeptic: “Nothing in the question establishes why p95 is 4s”; a missing composite index or poor replica configuration could make all three proposed changes wasted work.",
+          "Architect: At 20k queries/day, request volume is low; reducing scanned data through native pre-aggregation avoids cache invalidation and a second database.",
+          "Architect: ClickHouse requires migration, dual pipelines, reconciliation, monitoring, backups, and unfamiliar operations that exceed a safe two-week scope.",
+          "Skeptic: Redis leaves cold-cache latency at 4 seconds and introduces invalidation and stale-dashboard risks; it is justified only by measured, very high repetition.",
+          "Pragmatist: Postgres summaries preserve operational familiarity and offer simple failure behavior—stale charts if refresh fails—and straightforward fallback to raw queries.",
+          "Pragmatist: Late events, non-additive distinct counts, time zones, and high-cardinality dimensions can make naive hourly rollups incorrect or oversized."
+        ],
+        "assumptions": [
+          "The team can inspect pg_stat_statements and execute EXPLAIN safely against representative queries.",
+          "Dashboard freshness can tolerate hourly updates or a short recomputation window.",
+          "Most slow dashboards use a finite set of known dimensions and additive aggregates.",
+          "Raw data remains available for drill-down, reconciliation, and backfills.",
+          "Existing Postgres capacity can run incremental aggregation without materially worsening replication lag or dashboard reads."
+        ],
+        "risks": [
+          "Building summaries before diagnosis may solve the wrong bottleneck.",
+          "Late or corrected events may silently diverge from stored aggregates.",
+          "High-cardinality dimensions may make summaries approach raw-table size.",
+          "COUNT DISTINCT and other non-additive measures cannot be safely summed across hourly buckets.",
+          "Backfills or refresh jobs may cause I/O contention, table bloat, or replica lag.",
+          "Hourly granularity may not satisfy freshness or drill-down requirements.",
+          "Fallback to raw queries will retain the current latency during failures."
+        ],
+        "blind_spots": [
+          "No query plans, query-log repetition rates, indexes, partitioning scheme, hardware, replica configuration, write rate, freshness requirement, or dimensional cardinalities were provided.",
+          "The source schema and the Pragmatist’s JSONB assumption are unverified.",
+          "No evidence establishes whether p95 comes from a few query shapes, lock or I/O contention, replica lag, or broad aggregation scans.",
+          "The cost and duration of backfilling 13 months cannot be estimated reliably without row counts, scan throughput, and aggregate definitions."
+        ],
+        "simplest_viable_option": "Spend day 1–2 identifying the five slowest dashboard query shapes and fixing obvious indexes, pruning, statistics, bloat, and replica settings. Only for queries still dominated by large scans, add the minimum number of indexed Postgres summary tables, refresh them idempotently, and recompute a bounded recent window for late data. Keep raw-query fallback and add no new service.",
+        "change_my_mind_evidence": "Choose Redis only if production logs project greater than roughly 90% hit rate for identical SQL and parameters with acceptable staleness. Choose ClickHouse only if plans show aggregation-bound scans despite sound Postgres tuning, dashboard requirements demand arbitrary high-cardinality slicing that named summaries cannot cover, summary cardinality remains too large, and the team commits ongoing ClickHouse operational ownership.",
+        "next_step": "Capture pg_stat_statements for representative traffic, run EXPLAIN (ANALYZE, BUFFERS) on the five highest-impact dashboard queries, and calculate candidate summary cardinality and refresh cost. Proceed with targeted Postgres summaries only if those results prove scan-heavy aggregation is the bottleneck; target representative dashboard p95 below 1 second with reconciliation, freshness, repeatable backfills, and raw-query rollback verified.",
+        "mode_used": "deep",
+        "failures": []
+      }
+    },
+    {
+      "caseId": "cap-migration-cutover",
+      "attempt": 2,
+      "artifact": {
+        "recommendation": "First inspect the top slow dashboard queries with pg_stat_statements and EXPLAIN ANALYZE. If they are expensive raw-event aggregates that indexing cannot fix, implement narrowly scoped hourly summary tables in Postgres. Do not introduce ClickHouse or Redis now.",
+        "confidence": "High (91%): all panelists independently converge on diagnosis followed by native Postgres optimization; workload, team experience, and two-week deadline strongly disfavor new infrastructure.",
+        "consensus": "All panelists agree that 20k queries/day is only about 0.23 QPS, so throughput is not the problem. They reject ClickHouse under current staffing and timing, view Redis as unable to fix expensive underlying queries, and favor Postgres rollups when raw aggregation scans are confirmed.",
+        "disagreements": [
+          "The Skeptic requires query-plan diagnosis before selecting any architecture; the Architect and Pragmatist recommend summaries while also acknowledging that indexes or plans might eliminate the need.",
+          "The Pragmatist suggests possibly adding indexing or partitioning during the same two weeks; the others do not support expanding scope this far without query-plan evidence.",
+          "The Pragmatist cites a migration file not provided in the question, so its claims about a single events heap, JSONB, and missing indexes are not reliable evidence."
+        ],
+        "strongest_evidence": [
+          "Skeptic: \"20k queries/day ≈ 0.23 QPS\" means p95 latency is probably driven by per-query work rather than serving capacity.",
+          "Architect: read-only dashboards make pre-aggregation suitable, while ClickHouse adds ingestion, reconciliation, monitoring, backups, and unfamiliar operations.",
+          "Pragmatist: \"Redis caches the 4s miss\" but does not prevent expensive scans on cache misses.",
+          "Architect: Redis is justified only if measurement shows high exact-query repetition and an expected cache hit rate around 80% or better.",
+          "Skeptic: EXPLAIN ANALYZE proving aggregate scans that indexes cannot fix would make Postgres pre-aggregation the cheapest option with one source of truth.",
+          "Pragmatist: ClickHouse within two weeks would likely be an ingestion prototype rather than a production-ready operational system."
+        ],
+        "assumptions": [
+          "Most slow dashboard queries perform aggregates over large raw datasets.",
+          "Dashboard dimensions and metrics are finite enough to encode in a small number of summaries.",
+          "Hourly freshness is acceptable, or the current partial hour can be queried separately.",
+          "Postgres has capacity for summary writes and the initial backfill.",
+          "No existing query-plan analysis already disproves indexing or statistics problems."
+        ],
+        "risks": [
+          "Building summaries before diagnosis could preserve a bad query design or overlook a simple index, statistics, or plan fix.",
+          "Late-arriving data, failed jobs, and backfills can make summaries disagree with raw data.",
+          "Too many dimension combinations could cause summary-table growth and weak performance gains.",
+          "Hourly buckets may not support sub-hour freshness or arbitrary drill-downs.",
+          "A 13-month backfill could exceed the schedule or overload Postgres unless benchmarked and throttled."
+        ],
+        "blind_spots": [
+          "No pg_stat_statements breakdown, query plans, row counts, index inventory, cache-hit data, or I/O metrics were supplied.",
+          "The required latency target and acceptable dashboard staleness are unspecified.",
+          "The proportion of fixed dashboards versus ad-hoc analytics is unknown.",
+          "The number and cardinality of grouping dimensions are unknown.",
+          "Replica topology and whether it can accept rollup writes are unspecified."
+        ],
+        "simplest_viable_option": "Spend one or two days identifying the few queries responsible for p95 latency. Apply a direct index, statistics, or query rewrite if sufficient. Otherwise create only the minimum hourly Postgres summary tables required by those dashboards, with an idempotent incremental job and reconciliation check.",
+        "change_my_mind_evidence": "Choose Redis if measured exact-query repetition predicts a very high hit rate and bounded staleness is acceptable. Choose managed ClickHouse if dashboards require broad ad-hoc slicing that fixed summaries cannot express, Postgres rollups fail the latency target, and the team has adequate operating expertise and more implementation time.",
+        "next_step": "Capture the top slow queries and run EXPLAIN (ANALYZE, BUFFERS) on representative parameters; then estimate summary cardinality and benchmark one dashboard rollup before committing the remaining two-week window.",
+        "mode_used": "deep",
+        "failures": []
+      }
+    },
+    {
+      "caseId": "cap-rate-limit-design",
+      "attempt": 1,
+      "artifact": {
+        "recommendation": "Use a Redis-backed rate limiter keyed by authenticated client or API key across all gateway pods. Prefer a simple fixed-window INCR plus EXPIRE implementation initially; adopt a sliding window or Redis token bucket only if measured boundary bursts or required burst semantics justify it. Keep load-balancer connection limits only as coarse protection against transport exhaustion.",
+        "confidence": "High (95%): both panelists independently identify distributed, identity-based enforcement as the only option compatible with three pods and NAT-shared legitimate traffic.",
+        "consensus": "Both panelists agree that Redis must provide one shared quota across pods, the key must be authenticated client identity rather than source IP, process-local buckets provide inconsistent enforcement, and load-balancer connection limits do not provide request-level client fairness.",
+        "disagreements": [
+          "Panelist 1 selects the offered distributed sliding-window counter and suggests a Redis token bucket for burst tolerance.",
+          "Panelist 2 recommends starting with a simpler fixed window and upgrading only if boundary bursts cause measurable harm. This is the stronger simplicity argument, but fixed windows can permit roughly twice the nominal traffic around a window boundary."
+        ],
+        "strongest_evidence": [
+          "Panelist 1: \"In-process buckets create three independent limits, vary with pod routing, and reset on restart.\"",
+          "Panelist 1: \"Connection limits measure concurrent connections—not request fairness—and NAT makes IP identity invalid.\"",
+          "Panelist 2: \"3 pods × per-process bucket = limit is really 3 × configured,\" subject to routing behavior.",
+          "Panelist 2: \"Redis gives one shared counter per client ID—correct regardless of pod count or scaling events.\"",
+          "Panelist 2: An IP-keyed load-balancer limit would conflate the NAT-shared legitimate partner with abusive traffic."
+        ],
+        "assumptions": [
+          "Every client has a stable authenticated API key or client ID.",
+          "Authentication occurs before payment work expensive enough to cause starvation.",
+          "Redis can be operated with acceptable latency and availability.",
+          "The abusive client has a distinct identity from legitimate clients behind the shared NAT.",
+          "Returning 429 with Retry-After is acceptable."
+        ],
+        "risks": [
+          "A fixed window permits boundary bursts; use a sliding window or token bucket if this threatens capacity.",
+          "Redis adds latency and becomes part of the request-path availability model.",
+          "Fail-open preserves payment availability during Redis failure but temporarily removes abuse protection; fail-closed may block legitimate payments.",
+          "One quota per partner API key still allows that partner's users to starve each other unless finer-grained identity exists.",
+          "Limiting only after authentication does not protect authentication or connection resources from unauthenticated attacks."
+        ],
+        "blind_spots": [
+          "No gateway throughput, endpoint cost, desired quota, or legitimate burst profile was provided.",
+          "It is unknown whether Redis or a proven Redis limiter dependency already exists.",
+          "ALB connection-limit capabilities and the gateway's keep-alive behavior were not established.",
+          "Neither response defines atomic expiration handling, Redis outage policy, or per-endpoint weighting."
+        ],
+        "simplest_viable_option": "Atomically INCR a Redis counter keyed by client ID and time window, set its TTL on creation, and return 429 with Retry-After when exceeded. Add sliding-window logic only after boundary bursts are shown to matter.",
+        "change_my_mind_evidence": "Choose local token buckets if sticky routing is guaranteed and approximate per-pod enforcement is explicitly acceptable. Choose load-balancer connection controls as the primary mechanism only if measurements show connection exhaustion—not request-rate unfairness—is the actual failure mode. Upgrade the fixed window if load tests demonstrate harmful boundary bursts.",
+        "next_step": "Load-test a Redis fixed-window limiter using authenticated client IDs across all three pods, including concurrent increments, NAT-shared legitimate traffic, boundary bursts, and Redis timeout behavior; define the fail-open or fail-closed policy before rollout.",
+        "mode_used": "lean",
+        "failures": []
+      }
+    },
+    {
+      "caseId": "cap-rate-limit-design",
+      "attempt": 2,
+      "artifact": {
+        "recommendation": "Use a Redis-backed token bucket keyed by authenticated client ID or API key. This combines global enforcement across three pods with burst tolerance. Do not key by source IP. Use ALB or WAF controls only as an additional coarse defense against unauthenticated volumetric abuse. Define short Redis timeouts, atomic updates, TTLs, and an explicit conservative failure policy.",
+        "confidence": "High (92%). The topology requires cross-pod coordination, while NAT and burst requirements clearly favor identity-based token-bucket semantics.",
+        "consensus": "All panelists agree that source IP is the wrong fairness key, ALB connection limits do not represent payment request rates, authenticated client identity should be used, and a token bucket accommodates legitimate bursts better than a sliding window. They also agree infrastructure-level protection is additive rather than a replacement for application-level limiting.",
+        "disagreements": [
+          "Architect and Skeptic favor distributed enforcement because a local bucket allows pod-count-dependent overshoot; Pragmatist accepts that imprecision to avoid Redis.",
+          "Pragmatist considers approximately 3x overshoot bounded and acceptable, but no evidence establishes enough downstream headroom to prevent that overshoot from causing the reported starvation.",
+          "Pragmatist prioritizes an in-flight cap because starvation may be concurrency-driven; Architect treats concurrency limiting as conditional on measurements."
+        ],
+        "strongest_evidence": [
+          "Architect: A local token bucket grants a separate quota on every pod, traffic distribution changes the effective limit, and restarts erase state.",
+          "Skeptic: In-process limiting across three pods silently makes the effective global limit depend on pod count and autoscaling.",
+          "Architect: Redis-backed token-bucket semantics provide atomic global enforcement, burst capacity, and lower storage overhead than an exact sliding window.",
+          "Skeptic: Connection limits do not equal request-rate limits because keep-alive and HTTP/2 allow many requests over one connection.",
+          "Pragmatist: The limiter must run after authentication and use API key or merchant ID because a NAT address combines many legitimate users.",
+          "Architect and Pragmatist: Rate limiting may not solve starvation when slow requests consume scarce concurrency; measure in-flight work and latency."
+        ],
+        "assumptions": [
+          "The gateway has a stable authenticated client ID or API key before proxying.",
+          "A single client's traffic can be distributed across all three pods.",
+          "Preventing cross-client starvation requires a meaningful global quota rather than an approximate per-pod quota.",
+          "Redis can meet the gateway's latency and availability requirements with short timeouts and atomic operations.",
+          "Legitimate partner bursts can be represented by an evidence-based bucket capacity and refill rate."
+        ],
+        "risks": [
+          "Redis becomes a hot-path dependency and can cause either an outage or protection gap without an explicit failure policy.",
+          "A rate-only limiter may not prevent starvation caused by slow or resource-intensive requests.",
+          "Poorly chosen burst capacity could reject legitimate partner traffic or permit harmful spikes.",
+          "Key rotation or high-cardinality identities could increase Redis memory usage without TTLs.",
+          "Retries without Retry-After and client backoff could amplify load."
+        ],
+        "blind_spots": [
+          "No downstream capacity, request-rate, latency, or concurrency measurements were provided.",
+          "The abusive client's authentication status and ability to rotate credentials are unknown.",
+          "Redis availability, existing deployment, and p99 latency budget are unspecified.",
+          "Per-endpoint cost differences and contractual partner quotas are unspecified.",
+          "The acceptable behavior during Redis failure is not defined."
+        ],
+        "simplest_viable_option": "Implement one atomic Redis token-bucket operation after authentication, keyed by client ID, with a TTL, sustained rate, burst allowance, 429 response, and Retry-After header. Avoid an exact sliding-window implementation, dynamic policy systems, and distributed concurrency controls initially.",
+        "change_my_mind_evidence": "Choose an in-process token bucket if load tests prove that the maximum cross-pod overshoot, pod restarts, and autoscaling cannot exhaust downstream capacity and approximate quotas are contractually acceptable. Prioritize a per-client concurrency cap if measurements show starvation tracks in-flight slow requests rather than request rate.",
+        "next_step": "Measure per-client request rate, burst size, latency, and in-flight requests; then load-test a Redis token bucket against the payment service's safe capacity and document the Redis failure policy before rollout.",
+        "mode_used": "deep",
+        "failures": []
+      }
+    },
+    {
+      "caseId": "cap-schema-refactor",
+      "attempt": 1,
+      "artifact": {
+        "recommendation": "Use expand-and-contract: deploy bilingual readers across all three services and update the reporting job, then switch writers to the new vocabulary, backfill existing rows, and later remove legacy reads. Do not big-bang or store duplicate statuses.",
+        "confidence": "High (94%). Only one panelist succeeded, but its reasoning directly addresses rollback and the external dependency.",
+        "consensus": "The sole successful panelist rejects big-bang migration and recommends a compatibility period with dual-read support rather than duplicate database writes.",
+        "disagreements": [
+          "No panel disagreement was available because the second panelist timed out.",
+          "The proposed choice is refined: temporary mixed vocabulary during backfill is acceptable, but dual-writing two representations for each order is not."
+        ],
+        "strongest_evidence": [
+          "Panelist: rollback under 10 minutes is unreliable after a big-bang because rolled-back binaries may encounter newly written status values.",
+          "Panelist: the other team's weekly job grepping for 'done' is an uncoordinated dependency that could silently generate incorrect reports.",
+          "Panelist: one compatibility release across deployment cycles is safer and simpler than synchronizing multiple services and teams.",
+          "Panelist: duplicate status representations create conflicting sources of truth; temporary dual-read preserves one status per order."
+        ],
+        "assumptions": [
+          "Each service can map open/created, pending/processing, and done/completed to the same internal states.",
+          "The reporting job can be updated before legacy values are removed.",
+          "Rollback targets the bilingual compatibility release, not a legacy-only release.",
+          "The backfill can be paused, resumed, and reversed if necessary."
+        ],
+        "risks": [
+          "An undiscovered reader may reject or misinterpret new values.",
+          "The reporting change may miss grep-based logic outside the known job.",
+          "Removing compatibility before the rollback window closes would break rapid rollback.",
+          "Concurrent writes during backfill could restore legacy values unless writers are cut over first."
+        ],
+        "blind_spots": [
+          "No complete dependency inventory or code inspection was provided.",
+          "Database constraints, indexes, caches, event payloads, and downstream exports may also encode status values.",
+          "The second panelist produced no evidence due to timeout."
+        ],
+        "simplest_viable_option": "Release bilingual readers and the reporting fix first; verify for one deployment cycle; switch all writers to created/processing/completed; backfill rows in batches; retain bilingual reads through the rollback window; then remove legacy support.",
+        "change_my_mind_evidence": "Choose big-bang only if every reader is proven inventoried and atomically deployable, writes can be paused, the reporting owner joins the cutover, and both data and code can be restored within 10 minutes.",
+        "next_step": "Inventory every database and event consumer, including the reporting job, then define the compatibility release, writer cutover, backfill, rollback target, and legacy-removal criteria.",
+        "mode_used": "lean",
+        "degradation": "degraded: 1 of 2 panelists failed; result based on 1 panelist(s)",
+        "failures": [
+          "Panelist (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    },
+    {
+      "caseId": "cap-schema-refactor",
+      "attempt": 2,
+      "artifact": {
+        "recommendation": "Choose an expand-contract migration using the existing column: make all consumers accept both vocabularies, update the weekly report to recognize both 'done' and 'completed', switch writers to new values, batch-backfill old rows, verify a weekly report, then remove legacy support. Do not literally dual-write one scalar status.",
+        "confidence": "High (90%). Only one panelist succeeded, but its evidence directly addresses the cross-service coordination and rollback constraints.",
+        "consensus": "No multi-panel consensus is available because the second panelist timed out. The successful panelist strongly rejects a big-bang migration under the stated constraints.",
+        "disagreements": [
+          "No substantive disagreement was recorded; the second panelist timed out.",
+          "The question frames the alternative as dual-write, while Panelist 1 correctly reframes it as dual-read compatibility with temporarily mixed database values."
+        ],
+        "strongest_evidence": [
+          "Panelist 1: \"Big-bang couples three services, a separate team, data migration, and rollback.\"",
+          "Panelist 1: after rows are converted, rolling back to a legacy-only service would expose unknown statuses, making a sub-10-minute rollback unsafe.",
+          "Panelist 1: the unconstrained text column can hold mixed old and new values during transition without adding another column.",
+          "Panelist 1: \"No literal dual-write is needed: one scalar status cannot hold both values.\""
+        ],
+        "assumptions": [
+          "The mapping is exactly open→created, pending→processing, and done→completed.",
+          "All three services can temporarily read both vocabularies.",
+          "The reporting job can be changed before completed values reach it.",
+          "Rollback means returning to the dual-read compatibility release, not a legacy-only release.",
+          "No database constraint, trigger, or unlisted consumer rejects the new values."
+        ],
+        "risks": [
+          "An undiscovered consumer may fail when new values appear.",
+          "The reporting job's grep may miss completed records if its update is delayed or incorrect.",
+          "Removing compatibility before every legacy row and writer is eliminated could cause failures.",
+          "A partial backfill may temporarily produce inconsistent reporting unless both vocabularies are normalized."
+        ],
+        "blind_spots": [
+          "No inventory proves that the three services and weekly job are the only consumers.",
+          "No production row count or backfill duration is provided.",
+          "The reporting grep's exact implementation and surrounding semantics were not reviewed.",
+          "Only one panelist completed, so there is no independent counteranalysis."
+        ],
+        "simplest_viable_option": "Add a shared old-to-new normalization at each read boundary, update the report to match both terminal values, then switch writes and batch-update existing rows in place. Add no column and no dual-write mechanism.",
+        "change_my_mind_evidence": "Choose big-bang only if every consumer can be stopped and deployed together and both forward and reverse production-scale migrations are proven to finish safely within 10 minutes.",
+        "next_step": "Inventory every status reader and writer, including the reporting repo, then deploy dual-read compatibility everywhere before changing any stored or newly written value.",
+        "mode_used": "lean",
+        "degradation": "degraded: 1 of 2 panelists failed; result based on 1 panelist(s)",
+        "failures": [
+          "Panelist (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    },
+    {
+      "caseId": "cap-zero-downtime-index",
+      "attempt": 1,
+      "artifact": {
+        "recommendation": "Neither proposed path as stated. First verify PostgreSQL 11+ and that historical rows should be USD. Then add the constant-default NOT NULL column off-peak with a short lock_timeout; this is metadata-only and requires no backfill. Add an index separately only if production query plans justify it. If required while writes must continue, use CREATE INDEX CONCURRENTLY off-peak, monitor replication lag, and retry from scratch after cleaning up any invalid index.",
+        "confidence": "High (93%). Architect and Pragmatist independently agree on PostgreSQL's fast-default behavior and operational risks; the Skeptic timed out. Confidence depends on PostgreSQL 11+ and USD being correct for every historical row.",
+        "consensus": "Both successful panelists reject a 120M-row backfill and an hours-long maintenance window for the column. They agree that a constant default on PostgreSQL 11+ avoids rewriting existing rows, the brief ACCESS EXCLUSIVE lock should be bounded with lock_timeout, and the index is the only expensive operation. Both also question whether a low-selectivity standalone currency index is worthwhile.",
+        "disagreements": [
+          "No material conflict between the successful panelists.",
+          "The Pragmatist explicitly presents a non-concurrent index during a tested write freeze as a viable alternative when faster completion and lower replication impact outweigh availability; the Architect mentions this mainly as evidence that could change the recommendation.",
+          "The Skeptic produced no response, so no adversarial assessment of the shared PostgreSQL-version assumption is available."
+        ],
+        "strongest_evidence": [
+          "Architect: On PostgreSQL 11+, ADD COLUMN currency_code text NOT NULL DEFAULT 'USD' with a constant default is metadata-only, so no 120M-row backfill is required.",
+          "Pragmatist: A batched UPDATE would create heap rewrites, bloat, vacuum work, heavy WAL, and replication lag for no benefit.",
+          "Architect: A failed concurrent index build can leave an invalid index; drop it and restart because PostgreSQL cannot resume partial index progress.",
+          "Pragmatist: CREATE INDEX CONCURRENTLY preserves writes but remains the main WAL and replica-lag risk and performs more work than a blocking build.",
+          "Both: A B-tree where nearly every row initially contains USD is low-selectivity and may be unused; defer it until query plans prove value or consider a non-USD partial or query-shaped composite index."
+        ],
+        "assumptions": [
+          "RDS PostgreSQL is version 11 or newer.",
+          "Every existing invoice can truthfully be assigned USD.",
+          "The default is the constant literal 'USD', not a volatile expression.",
+          "The table is not partitioned in a way that changes index operations.",
+          "Brief ACCESS EXCLUSIVE lock attempts are acceptable off-peak.",
+          "Application writes can continue safely while the concurrent index is built."
+        ],
+        "risks": [
+          "A long-running transaction can prevent the ALTER from acquiring ACCESS EXCLUSIVE; without lock_timeout, lock queues could cause application timeouts.",
+          "The concurrent index build can materially increase I/O, WAL volume, storage usage, and replication lag.",
+          "Cancellation or failure can leave an INVALID index requiring cleanup before retry.",
+          "A full low-selectivity index may waste storage and increase write amplification without improving queries.",
+          "If PostgreSQL is older than 11 or historical currencies are not all USD, the metadata-only strategy is invalid."
+        ],
+        "blind_spots": [
+          "No measured index build duration, WAL volume, available storage, IOPS headroom, or replica catch-up rate was supplied.",
+          "No production queries or EXPLAIN plans establish that the requested index helps.",
+          "Long-running transaction patterns and off-peak write volume are unknown.",
+          "The Skeptic timed out, reducing independent challenge coverage."
+        ],
+        "simplest_viable_option": "Verify PostgreSQL 11+ and historical USD correctness; off-peak run ALTER TABLE invoices ADD COLUMN currency_code text NOT NULL DEFAULT 'USD' with a short lock_timeout. Do not backfill. Defer the index unless a real query requires it.",
+        "change_my_mind_evidence": "PostgreSQL 10 or older; a nonconstant default; evidence that historical rows require different currencies; production EXPLAIN results proving a standalone index materially helps; or staging measurements showing that a tested non-concurrent build fits an acceptable write-freeze window with safer replication impact.",
+        "next_step": "Check the PostgreSQL major version, validate the historical-currency invariant, inspect long-running transactions, and obtain EXPLAIN evidence for the index before scheduling the off-peak ALTER.",
+        "mode_used": "deep",
+        "degradation": "degraded: 1 of 3 panelists failed; result based on 2 panelist(s)",
+        "failures": [
+          "Skeptic (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    },
+    {
+      "caseId": "cap-zero-downtime-index",
+      "attempt": 2,
+      "artifact": {
+        "recommendation": "Choose neither bundle. On PostgreSQL 11+, run an off-peak metadata-only `ALTER TABLE invoices ADD COLUMN currency_code text NOT NULL DEFAULT 'USD'` with a short `lock_timeout`; do not backfill. Defer the index unless query plans prove value. If the index is mandatory, build it separately with `CREATE INDEX CONCURRENTLY` off-peak, monitor replication lag and I/O, and retry after dropping any failed INVALID index.",
+        "confidence": "High (92%) assuming PostgreSQL 11+ and a constant default. The Skeptic timed out, but the two successful panelists independently agree on the core PostgreSQL behavior and operational choice.",
+        "consensus": "Architect and Pragmatist agree that PostgreSQL 11+ uses fast-default metadata behavior, making a 120M-row backfill unnecessary. Both reject a maintenance-window rewrite, recommend off-peak execution, and consider a full index on an initially single-value column low-value and operationally risky.",
+        "disagreements": [
+          "The Architect says to build the concurrent index only if measured plans justify it; the Pragmatist more strongly recommends skipping it and suggests a partial non-USD index if needed.",
+          "The Pragmatist asserts all relevant RDS versions are PostgreSQL 11+ and recommends `statement_timeout = 0`; these are environment-specific claims not established by the supplied facts. Verify rather than assume.",
+          "The Pragmatist suggests dropping the default later would require physically backfilling old rows. PostgreSQL's stored missing-value behavior generally preserves existing logical values, so this is not persuasive evidence for a backfill."
+        ],
+        "strongest_evidence": [
+          "Architect: PostgreSQL 11+ can add a NOT NULL column with a constant default without rewriting 120M heap rows.",
+          "Architect: a batched backfill would create avoidable WAL, bloat, and replica lag when replication is already near its alarm threshold.",
+          "Architect: `CREATE INDEX CONCURRENTLY` preserves writes but does not resume internally; failure may leave an INVALID index that must be dropped and rebuilt.",
+          "Pragmatist: an index whose 120M initial entries are all `USD` has almost no selectivity, while creating it still consumes substantial I/O and WAL.",
+          "Both successful panelists: the metadata-only ALTER still requires a brief ACCESS EXCLUSIVE lock, so blocker inspection, a short lock timeout, and off-peak execution remain necessary."
+        ],
+        "assumptions": [
+          "The RDS PostgreSQL major version is 11 or newer.",
+          "`USD` is a constant default, not a value derived per invoice.",
+          "Existing readers, logical replication, DMS, exports, and other consumers accept PostgreSQL's logical default for pre-existing tuples.",
+          "The requested index is negotiable based on demonstrated query needs.",
+          "No unusually long transaction prevents acquisition of the ALTER lock."
+        ],
+        "risks": [
+          "The ALTER can wait behind an old transaction and then briefly block traffic; bound this with `lock_timeout`.",
+          "A concurrent index build can run for a long time, increase I/O and replica lag, wait on old snapshots, or leave an INVALID index after failure.",
+          "A plain `currency_code` btree may consume significant storage and write overhead while providing little benefit when cardinality is low.",
+          "PostgreSQL versions older than 11 would rewrite the table for this ALTER and require a different staged migration.",
+          "Downstream systems that inspect physical tuples rather than PostgreSQL's logical row values may require an explicit backfill."
+        ],
+        "blind_spots": [
+          "Actual PostgreSQL/RDS version and parameter settings were not supplied.",
+          "No production query plans or future currency distribution establish whether the index is useful or what index shape is appropriate.",
+          "Table size, index build benchmark, storage headroom, IOPS limits, replica topology, and acceptable lag thresholds are unknown.",
+          "The failed Skeptic provided no adversarial review.",
+          "The desired SQL type and whether a currency-code constraint is required were not specified."
+        ],
+        "simplest_viable_option": "After 7pm UTC, verify PostgreSQL 11+, inspect/block long transactions, then execute only the fast-default ALTER with a short `lock_timeout`. Treat it as atomic: either the column exists or retry. Skip both backfill and index until query evidence requires the index.",
+        "change_my_mind_evidence": "PostgreSQL below 11, a nonconstant per-row currency value, a downstream consumer demonstrably unable to observe missing-value defaults, or production EXPLAIN/benchmark evidence showing that a specific index materially improves an important query and can be built within measured lag and I/O limits.",
+        "next_step": "Confirm `server_version`, downstream compatibility, and the query requiring the index. Then schedule the metadata-only ALTER off-peak. If the index remains mandatory, test its shape and duration on production-like data and run `CREATE INDEX CONCURRENTLY` as a separately retryable stage with explicit lag/I/O abort thresholds.",
+        "mode_used": "deep",
+        "degradation": "degraded: 1 of 3 panelists failed; result based on 2 panelist(s)",
+        "failures": [
+          "Skeptic (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    },
+    {
+      "caseId": "cap-procedure-holdout",
+      "attempt": 1,
+      "artifact": {
+        "recommendation": "Implement one fail-closed GitHub Actions release workflow now. It should be the only publishing path, verify version and changelog updates, require migration approval when relevant, and run smoke tests against the exact artifact being released. Do not build a CLI or rely on a PR template. Defer semantic-release until release frequency, commit conventions, or independent package versioning justify it.",
+        "confidence": "High, 87%. Architect and Pragmatist agree that required CI gates address the actual failure mode. Confidence is limited by the Skeptic timing out and unknown monorepo versioning, release frequency, and smoke-test details.",
+        "consensus": "Both successful panelists reject a custom CLI and checklist-only enforcement. They agree GitHub Actions should provide one auditable, fail-closed release path with required migration approval and executable smoke testing.",
+        "disagreements": [
+          "Architect recommends semantic-release-style automation immediately for versioning and changelogs; Pragmatist argues it automates only two steps, may impose conventional-commit discipline, and adds monorepo complexity.",
+          "Architect estimates 2–4 engineering days for broader automation; Pragmatist estimates roughly half a day for native GitHub Actions gates.",
+          "Architect favors generated versions and changelogs; Pragmatist keeps them manually authored but mechanically required until stronger evidence supports automation."
+        ],
+        "strongest_evidence": [
+          "Pragmatist: \"People skip RELEASE.md. A template is the same doc with checkboxes. Discipline is the bug; more reminders won't fix it.\"",
+          "Pragmatist: GitHub Actions is already the release entry point, so a custom CLI would create another tool people must remember to run and maintain.",
+          "Architect: \"Semantic-release alone only reliably solves versioning and changelog generation,\" while migration approval and smoke testing still require explicit gates.",
+          "Architect: publishing must use the same commit or artifact that passed staging; rebuilding afterward weakens the smoke-test guarantee.",
+          "Pragmatist: a fail-closed workflow makes the worst likely failure a blocked release rather than an incomplete production release."
+        ],
+        "assumptions": [
+          "Publishing can be restricted to GitHub Actions through repository permissions and branch or environment protection.",
+          "A canonical version source and changelog file exist.",
+          "Migration changes can be detected by stable file paths or another deterministic rule.",
+          "Smoke testing can produce a machine-verifiable result against staging or the release artifact.",
+          "The monorepo does not yet require complex independent package versioning."
+        ],
+        "risks": [
+          "Simple version and changelog checks can confirm presence without confirming correctness.",
+          "A coarse migration-path trigger may miss generated schema changes or require unnecessary approvals.",
+          "Manual version selection can still produce an incorrect semantic version, although it cannot be omitted.",
+          "Smoke tests may give false confidence if they do not exercise the staged release candidate.",
+          "Any alternate publishing credentials or bypass path would undermine fail-closed enforcement."
+        ],
+        "blind_spots": [
+          "The Skeptic panelist timed out, so no adversarial review was available.",
+          "Release frequency and historical incident severity are unknown.",
+          "Shared versus independent package versioning is unspecified.",
+          "Current commit-message consistency is unknown.",
+          "The deploy, staging, rollback, and package-publishing topology is unspecified."
+        ],
+        "simplest_viable_option": "Create one required GitHub Actions release workflow that blocks publishing unless the version differs from the last release, the changelog contains that version, migration changes receive designated approval, and smoke tests pass. Restrict publishing credentials to this workflow.",
+        "change_my_mind_evidence": "Adopt semantic-release or changesets sooner if releases occur more than weekly, version or changelog mistakes remain common despite gates, commit history is already reliably conventional, or independent package versions are causing release errors. Consider a thin CLI only if essential release operations must occur outside CI.",
+        "next_step": "Define the monorepo versioning model, migration-change trigger, exact smoke command, and canonical release artifact; then implement and require the single GitHub Actions release workflow.",
+        "mode_used": "deep",
+        "degradation": "degraded: 1 of 3 panelists failed; result based on 2 panelist(s)",
+        "failures": [
+          "Skeptic (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    },
+    {
+      "caseId": "cap-procedure-holdout",
+      "attempt": 2,
+      "artifact": {
+        "recommendation": "Adopt a narrow release-PR bot enforced by GitHub Actions: use release-please for unified versioning or Changesets for independently versioned packages; automate version bumps, changelog generation, and smoke-runs; require migration approval through a protected GitHub Environment. Keep publishing credentials exclusively in CI. Do not build a custom CLI or rely on PR-template checkboxes.",
+        "confidence": "High (89%). Architect and Pragmatist independently converge on CI-enforced automation; the Skeptic timed out, so no adversarial assessment was available. Exact bot choice remains uncertain until the monorepo versioning model is known.",
+        "consensus": "The successful panelists agree that GitHub Actions must be the enforcement boundary, a release PR should provide an inspectable checkpoint, mechanical work should be automated, migration judgment should remain a blocking human gate, and neither a custom CLI nor PR-template checkboxes meets the goal of requiring less discipline.",
+        "disagreements": [
+          "The Architect recommends a semantic-release-style workflow generically; the Pragmatist specifically prefers release-please and argues semantic-release imposes conventional-commit and monorepo complexity.",
+          "Effort estimates differ: Architect estimates 2–4 engineering days, while Pragmatist estimates roughly half a day plus one or two releases of stabilization.",
+          "The Pragmatist suggests initially using a general Environment reviewer gate for migrations; the Architect more explicitly calls for migration detection and migration-owner approval."
+        ],
+        "strongest_evidence": [
+          "Architect: A custom CLI still depends on someone running it and creates maintenance overhead for only three releasers.",
+          "Architect: A PR checklist records claims but proves nothing, adding discipline rather than removing it.",
+          "Pragmatist: If publishing is wired exclusively through GitHub Actions, failed smoke jobs and required Environment approvals become actual release blockers.",
+          "Pragmatist: release-please generates an inspectable release PR without requiring the conventional-commit discipline associated with semantic-release.",
+          "Pragmatist: The monorepo versioning model is decisive—release-please fits coupled versions, while Changesets fits independently versioned packages.",
+          "Architect: Human approval should remain only where judgment is genuinely required, namely migration review."
+        ],
+        "assumptions": [
+          "Production publishing or deployment can run from GitHub Actions.",
+          "Smoke checks can be automated at least enough to produce a blocking pass or fail result.",
+          "Migration-bearing changes can be detected from paths, labels, or another deterministic repository signal.",
+          "Release PR metadata is sufficiently structured to derive versions and changelog entries.",
+          "GitHub Environment protection is available for the repository and plan."
+        ],
+        "risks": [
+          "Choosing the wrong versioning model could produce incorrect package releases.",
+          "Poor PR labels or commit metadata could create incorrect bumps or changelog entries.",
+          "A broad Environment approval may become a rubber stamp unless migration detection targets the correct reviewer.",
+          "Manual publishing credentials left on developer machines would permit bypassing every CI gate.",
+          "Smoke automation may create false confidence if it does not exercise the critical release path.",
+          "Bot and action dependencies require pinning and occasional maintenance."
+        ],
+        "blind_spots": [
+          "The Skeptic panelist failed, leaving no dedicated adversarial critique.",
+          "Release frequency and cost of prior misses were not provided.",
+          "It is unknown whether packages use unified or independent versions.",
+          "Current smoke-test availability, deployment target, migration layout, and rollback behavior are unspecified.",
+          "Repository permissions and GitHub plan support for required Environment reviewers are unknown."
+        ],
+        "simplest_viable_option": "Add one release-PR bot workflow, one blocking smoke job, and one protected production Environment approval. Use release-please if versions move together; use Changesets if packages version independently. Defer custom dashboards, CLI frameworks, fully unattended publishing, and sophisticated migration automation.",
+        "change_my_mind_evidence": "Prefer a tiny local release script only if publishing cannot safely run in GitHub Actions due to signing, air-gap, or platform constraints. Consider a custom CLI only after measured workflow limitations prove existing bots cannot express required release logic. A checklist alone becomes reasonable only for rare, low-impact releases where automation cost clearly exceeds repeated failure cost.",
+        "next_step": "Determine whether package versions are unified or independent, then prototype the matching bot in dry-run/release-PR mode and define deterministic migration detection plus the minimum smoke command required to block publishing.",
+        "mode_used": "deep",
+        "degradation": "degraded: 1 of 3 panelists failed; result based on 2 panelist(s)",
+        "failures": [
+          "Skeptic (opencode-go/kimi-k3): timed out after 180000ms"
+        ]
+      }
+    }
+  ]
+}
