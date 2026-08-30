@@ -111,6 +111,29 @@ Ask your agent to call the `council` tool:
 - "Use the council tool in deep mode: should we migrate from Postgres to SQLite for the edge deploy? Context: <…>"
 - "Run council (auto) on which caching layer to adopt."
 
+## Quality baseline (blind harness)
+
+A small repo-local harness reruns **2–3 organic council cases** against a real OpenCode server and live models, machine-checks every decision artifact against real session transcripts, grades the decisions with a **blinded grader** (anonymous labels, hidden rubric, model identities scrubbed), and emits a JSON report you can diff against a checked-in baseline.
+
+```sh
+bun run council:eval                       # writes harness/last-run.json (gitignored), compares vs harness/baseline.json when present
+bun run council:eval -- --out /tmp/r.json  # custom output path (normal runs can never overwrite the baseline file)
+```
+
+To refresh the baseline, verify a run looks right first, then opt in explicitly:
+
+```sh
+bun run council:eval -- --accept-baseline --out harness/baseline.json
+```
+
+Without `--accept-baseline`, writing to the baseline path is refused with exit code 2.
+
+Report shape: `council` (version/commit/models), `run` (timestamps), `cases` (per-case machine checks + session evidence + grade), `aggregate`, and `comparison` vs the baseline (same/better/worse verdicts — single-run deltas are directional, not significant). The comparison also reports model drift (`comparison.models`): when panel/router/judge/grader identities differ from the baseline (or the baseline records none), it warns that grade deltas are not directly comparable.
+
+Configuration (optional): `COUNCIL_PANEL_MODELS="provider/a,provider/b,provider/c"`, `COUNCIL_GRADER_MODEL="provider/g"`, `COUNCIL_TIMEOUT_MS`. Costs: a full run makes ~8–11 model calls (router + panelists + judge per case, one grader pass).
+
+Blinding is enforced in code: candidate-visible prompts and workspace names are checked against a forbidden-words list before any session spawns, and harness tests keep it that way. See `harness/`.
+
 ## Development
 
 ```sh

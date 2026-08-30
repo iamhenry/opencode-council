@@ -27,7 +27,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "council:eval": "bun harness/run.ts"
   },
   "dependencies": {
     "zod": "4.1.8"

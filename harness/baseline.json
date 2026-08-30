@@ -1,0 +1,316 @@
+{
+  "harness": {
+    "name": "opencode-council-quality-run",
+    "schema": 1
+  },
+  "council": {
+    "version": "0.1.1",
+    "commit": "bb3f9fc2dd420efe9c10ced4b202539b84d291cb",
+    "models": {
+      "panel": [
+        "openai/gpt-5.6-sol",
+        "opencode-go/kimi-k3",
+        "xai/grok-4.6"
+      ],
+      "router": "opencode-go/glm-5.3-flash",
+      "judge": "openai/gpt-5.6-sol",
+      "grader": "opencode-go/glm-5.3"
+    }
+  },
+  "run": {
+    "startedAt": "2026-08-30T19:37:04.692Z",
+    "finishedAt": "2026-08-30T19:43:23.243Z",
+    "durationMs": 378551,
+    "casesRun": 3
+  },
+  "cases": [
+    {
+      "caseId": "streak-storage",
+      "slug": "streak-tracker-cli",
+      "modeRequested": "lean",
+      "question": "I'm building a tiny habit-streak tracker that runs in the terminal. Should streak data live in a plain JSON file or a SQLite database? Expect a few hundred entries per person, one machine, no syncing planned.",
+      "machine": {
+        "artifactSchemaValid": true,
+        "modeUsed": "lean",
+        "degradation": null,
+        "failures": [],
+        "councilError": null,
+        "sessionEvidence": {
+          "childSessionCount": 3,
+          "messageCount": 5,
+          "modelIDsSeen": [
+            "gpt-5.6-sol",
+            "kimi-k3"
+          ],
+          "error": null
+        }
+      },
+      "artifact": {
+        "recommendation": "Use a plain JSON file with atomic writes: write a temporary file in the same directory, then rename it over the existing file. SQLite is unnecessary for the stated scale and usage.",
+        "confidence": "High (95%). Both panelists independently reach the same conclusion, and the requirements strongly support it. Panelist 2's package.json and Node SQLite claims are unverified, but they are not needed for the decision.",
+        "consensus": "Both panelists recommend JSON because the dataset is tiny, fits in memory, has one expected writer, needs no syncing, and does not require relational queries. Both identify concurrent writers and more complex querying as reasons to reconsider SQLite.",
+        "disagreements": [],
+        "strongest_evidence": [
+          "Panelist 1: “A few hundred entries fit comfortably in memory” and one machine with no syncing removes the main concurrency motivation for SQLite.",
+          "Panelist 1: JSON uses standard runtime APIs and avoids SQLite packaging and migration complexity.",
+          "Panelist 2: The complete data operation can remain “read file, parse, mutate, write back,” while simple queries use ordinary array operations.",
+          "Both panelists: SQLite becomes worthwhile when concurrent writers, transactional multi-record operations, relational queries, or materially larger datasets become real requirements."
+        ],
+        "assumptions": [
+          "Only one CLI process normally writes at a time.",
+          "The data model remains small and simple.",
+          "Rewriting the full file on each update is acceptable.",
+          "The application validates parsed data rather than blindly trusting manually edited JSON."
+        ],
+        "risks": [
+          "Simultaneous CLI processes can overwrite each other's updates; atomic rename prevents partial files but not lost updates.",
+          "Manual edits can produce invalid JSON or invalid records.",
+          "Incorrect temporary-file handling can leave stale files or fail across filesystems.",
+          "Habit data may still be personally sensitive, so the file should use user-only permissions where practical."
+        ],
+        "blind_spots": [
+          "No actual package.json, supported Node versions, schema, or reporting requirements were provided.",
+          "Panelist 2's claims about zero dependencies and current node:sqlite stability were not evidenced and may be outdated.",
+          "Neither panelist details recovery behavior for malformed or missing files."
+        ],
+        "simplest_viable_option": "Store one JSON document in the user's application-data directory. On update, read and validate it, mutate in memory, write a temporary file beside it, then atomically rename it. Avoid an ORM, migrations, and a custom storage abstraction until requirements justify them.",
+        "change_my_mind_evidence": "Demonstrated concurrent writers, required multi-record transactions, recurring corruption or lost-update incidents, relational reporting that becomes awkward in memory, substantially larger datasets, or an existing reliable SQLite dependency.",
+        "next_step": "Implement the minimal JSON read/validate/atomic-write path and one runnable check proving an interrupted-style write cannot replace valid data with a partial document.",
+        "mode_used": "lean",
+        "failures": []
+      },
+      "grade": {
+        "total": 10,
+        "maxTotal": 10,
+        "criteria": {
+          "answers_question": {
+            "score": 2,
+            "note": "Picks JSON flat-out and ties it to every stated constraint: few hundred entries, one machine, no syncing, no relational queries."
+          },
+          "specific_evidence": {
+            "score": 2,
+            "note": "Evidence cites the stated scale ('a few hundred entries fit comfortably in memory'), the no-sync/no-concurrency reasoning, and the sharp distinction that atomic rename prevents partial files but not lost updates."
+          },
+          "non_obvious_risks": {
+            "score": 2,
+            "note": "The partial-file-vs-lost-update distinction and cross-filesystem rename failure are exactly the traps a generic 'just use JSON' answer misses, and flagging habit data as personally sensitive is a bonus."
+          },
+          "genuinely_simple": {
+            "score": 2,
+            "note": "One file, read-validate-mutate-atomic-rename, explicitly no ORM/migrations/storage abstraction — startable today with runtime APIs alone."
+          },
+          "actionable_next_step": {
+            "score": 2,
+            "note": "Minimal implementation path plus one runnable check proving an interrupted write cannot replace valid data — small and objectively checkable."
+          }
+        },
+        "note": "Strongest of the three; only flaw is the panel drifting into Node-specific claims (package.json, node:sqlite) the question never specified, which the artifact itself quarantines as unverified and unneeded."
+      },
+      "gradeError": null
+    },
+    {
+      "caseId": "accounts-auth",
+      "slug": "note-app-accounts",
+      "modeRequested": "deep",
+      "question": "We're adding user accounts to our note-taking web app. Should we build session auth ourselves with cookies, or adopt an auth library like Better Auth? Team of two, shipping weekly, a few thousand users expected in year one, and we need email plus Google sign-in.",
+      "machine": {
+        "artifactSchemaValid": true,
+        "modeUsed": "deep",
+        "degradation": null,
+        "failures": [],
+        "councilError": null,
+        "sessionEvidence": {
+          "childSessionCount": 4,
+          "messageCount": 10,
+          "modelIDsSeen": [
+            "gpt-5.6-sol",
+            "grok-4.6",
+            "kimi-k3"
+          ],
+          "error": null
+        }
+      },
+      "artifact": {
+        "recommendation": "Adopt Better Auth, contingent on a one-day compatibility spike against the actual Next.js, Vercel, Postgres, and ORM setup. Use database-backed sessions with secure httpOnly cookies. Keep authorization separate: every server-side note query must enforce notes.user_id = session.user.id. Do not build Google OAuth or session authentication yourselves.",
+        "confidence": "High (92%). All panelists independently reject DIY auth under the two-person, two-week constraint. Better Auth's exact adapter fit remains unverified.",
+        "consensus": "All panelists recommend Better Auth over custom authentication. They agree that email plus Google entails OAuth, account linking, password reset, session security, and revocation—not merely setting cookies—and that year-one user volume is irrelevant compared with security and delivery risk.",
+        "disagreements": [
+          "The Architect estimates 5–8 engineer-days, while the Pragmatist estimates 3–5 days; the longer estimate more credibly includes verification, reset, email verification, migration, and authorization.",
+          "The Skeptic questions whether Google must launch immediately and proposes dropping it if integration slips; the Pragmatist treats both requested methods as launch requirements.",
+          "The Pragmatist suggests route middleware, while the Architect correctly stresses that middleware alone is insufficient and ownership must be enforced in every server-side note query.",
+          "The panelists differ on fallback choice—Clerk versus Auth.js—but provide no evidence that a fallback is needed before testing Better Auth."
+        ],
+        "strongest_evidence": [
+          "Architect: Better Auth handles session rotation, OAuth state, CSRF, password hashing, account linking, and expiration while still using secure cookies.",
+          "Skeptic: With Google in scope, DIY risks missing PKCE, nonce validation, ID-token verification, and account linking, potentially enabling silent account takeover.",
+          "Architect: Authentication and authorization must remain separate; every server-side note query should enforce notes.user_id = session.user.id.",
+          "Pragmatist: The two-week budget should cover integrating user ownership into notes rather than reinventing authentication.",
+          "Skeptic: Login is only the beginning; reset, verification, revocation, rate limiting, and duplicate-account handling form most of the implementation tail.",
+          "All roles: A few thousand users does not justify custom auth; schedule and security surface determine the decision."
+        ],
+        "assumptions": [
+          "Email sign-in means email and password, not magic links.",
+          "Better Auth supports the project's exact Next.js version, router mode, database access layer, and Vercel deployment model.",
+          "Neither team member already maintains a proven production authentication implementation.",
+          "Google sign-in is genuinely required, though it may be deferred rather than replaced with DIY.",
+          "The application can adopt Better Auth's account and session tables.",
+          "A transactional email provider can support verification and password reset."
+        ],
+        "risks": [
+          "Better Auth adapter incompatibility or integration friction could consume the two-week budget.",
+          "Library upgrades may require urgent security patches or database migrations.",
+          "Library-native tables create migration cost if authentication providers change later.",
+          "Incorrect Google-to-password account linking could split notes or enable account takeover.",
+          "Protecting routes only through middleware could leave direct server actions or queries vulnerable.",
+          "Existing anonymous notes require an explicit claim, migration, or deletion policy.",
+          "Password reset, verification, rate limiting, normalized unique emails, and session revocation may be omitted under schedule pressure."
+        ],
+        "blind_spots": [
+          "The ORM or database client is unspecified.",
+          "The current Next.js router and deployment configuration are unknown.",
+          "Existing-note ownership and migration behavior are undefined.",
+          "The desired email flow, linking policy, session lifetime, account deletion behavior, and email provider are undefined.",
+          "The panel provides no verified deployment result from the actual application.",
+          "Some cited Better Auth release and security claims were not independently validated in this council."
+        ],
+        "simplest_viable_option": "Run a one-day Better Auth spike using its native Postgres schema and APIs: email/password, Google, database sessions, secure cookies, logout, and one two-user note-isolation test. If it passes, implement it without custom wrappers or provider abstractions. Defer 2FA, passkeys, organizations, device management, and enterprise SSO.",
+        "change_my_mind_evidence": "Choose another library or managed provider if the spike cannot deploy reliably on the actual stack, requires substantial adapter work, or exposes unacceptable migration churn. Consider DIY only if Google is removed and a team member already owns a proven, maintained production auth implementation.",
+        "next_step": "Time-box a one-day spike with pass criteria: email signup/login/reset, Google login, logout, session persistence after Vercel deployment, safe same-email linking, and server-side isolation proving one user cannot read or modify another user's note.",
+        "mode_used": "deep",
+        "failures": []
+      },
+      "grade": {
+        "total": 10,
+        "maxTotal": 10,
+        "criteria": {
+          "answers_question": {
+            "score": 2,
+            "note": "Concrete pick (Better Auth, database sessions, per-query authorization) directly answers build-vs-adopt using the stated team size and email+Google scope, though it recasts 'shipping weekly' as an unstated 'two-week budget'."
+          },
+          "specific_evidence": {
+            "score": 2,
+            "note": "Cites named failure modes (PKCE, nonce validation, ID-token verification, account-linking takeover), competing effort estimates (3–5 vs 5–8 engineer-days), and correctly dismisses 'few thousand users' as irrelevant to the decision."
+          },
+          "non_obvious_risks": {
+            "score": 2,
+            "note": "Middleware-only protection leaving server actions exposed, Google-to-password linking splitting notes, and the anonymous-note claim/migration policy are blind spots a generic 'use a library' answer never raises."
+          },
+          "genuinely_simple": {
+            "score": 2,
+            "note": "One-day spike then direct integration with no wrapper layer, deferring 2FA/passkeys/organizations/SSO — adopt-the-library is correctly framed as the simple option and is startable today."
+          },
+          "actionable_next_step": {
+            "score": 2,
+            "note": "Time-boxed one-day spike with explicit pass criteria including a two-user note-isolation test — concrete and objectively checkable."
+          }
+        },
+        "note": "Excellent artifact; the only blemishes are the fabricated two-week deadline and reliance on Better Auth release/security claims it itself admits were not validated."
+      },
+      "gradeError": null
+    },
+    {
+      "caseId": "package-shape",
+      "slug": "cli-package-shape",
+      "modeRequested": "auto",
+      "question": "Our TypeScript package ships both a library and a command-line tool from one repo. Releases have been awkward because the two halves version at different paces. Should we split into two packages in one repo, split into two repos, or keep one package with one version?",
+      "machine": {
+        "artifactSchemaValid": true,
+        "modeUsed": "deep",
+        "degradation": null,
+        "failures": [],
+        "councilError": null,
+        "sessionEvidence": {
+          "childSessionCount": 5,
+          "messageCount": 11,
+          "modelIDsSeen": [
+            "glm-5.3-flash",
+            "gpt-5.6-sol",
+            "grok-4.6",
+            "kimi-k3"
+          ],
+          "error": null
+        }
+      },
+      "artifact": {
+        "recommendation": "Keep one package with one version for now. Add an explicit library export if the library is genuinely public. Consider two packages in the same repo only after measurable consumer or dependency pain proves independent versioning is necessary. Do not use two repos without separate ownership or trust boundaries.",
+        "confidence": "High (88%). The concrete manifest evidence shows one CLI-shaped package and no published library boundary; splitting now would be speculative.",
+        "consensus": "All panelists reject two repositories unless ownership, security, technology, or lifecycle materially differ. They also agree that two packages in one repo is preferable to two repos if independent releases become justified.",
+        "disagreements": [
+          "Architect conditionally prefers two packages in one repo when distinct public consumers genuinely require independent releases.",
+          "Skeptic and Pragmatist prefer one package because different release pace alone does not justify permanent workspace, publishing-order, and dependency-range complexity.",
+          "Architect views independent cadence as a potential structural requirement; Skeptic and Pragmatist view harmless synchronized version bumps as cheaper than restructuring."
+        ],
+        "strongest_evidence": [
+          "Skeptic: package.json exposes a bin but no main or exports, so the alleged library is not currently published as a clear library surface.",
+          "Pragmatist: CLI-only changes can use patch releases while library API changes use semver-appropriate minor or major releases; unaffected consumers can ignore unrelated bumps.",
+          "Architect: two packages in one repo preserve atomic changes, shared CI, and compatibility testing while allowing independent versions—but only if distinct public consumers and release needs are proven.",
+          "Skeptic: splitting introduces recurring publish ordering, version-range synchronization, dual changelogs, and CI coordination.",
+          "Pragmatist: two repositories add cross-repository synchronization and issue-ownership costs without an identified payer."
+        ],
+        "assumptions": [
+          "Different release pace is currently the primary complaint, not incompatible public API lifecycles.",
+          "No separate teams, access controls, or security boundaries require repository separation.",
+          "The CLI and library share implementation, types, or runtime behavior.",
+          "Unrelated version bumps are harmless to consumers.",
+          "The manifest evidence accurately represents the package currently shipped."
+        ],
+        "risks": [
+          "Library consumers may install unnecessary CLI dependencies and experience avoidable package weight.",
+          "A shared major version could become misleading if the CLI and library develop truly independent breaking-change schedules.",
+          "A combined changelog can become noisy unless entries are grouped by CLI and library.",
+          "Adding exports may reveal that the current internal library API is not ready to become a stable public contract."
+        ],
+        "blind_spots": [
+          "No release history quantifies how often changes affect only one surface.",
+          "No consumer data establishes whether CLI and library audiences overlap.",
+          "No dependency-size measurements show the cost imposed on library-only users.",
+          "Current CI, publishing workflow, download patterns, and ownership model are unknown."
+        ],
+        "simplest_viable_option": "Retain one package, one version, one changelog, and one publish pipeline. Add exports or main only if the library is intentionally public, and group changelog entries under CLI and Library headings.",
+        "change_my_mind_evidence": "Choose two packages in one repo if sustained release history shows independent breaking-change schedules, real consumers use each surface separately, or library users report measurable CLI dependency or install-size costs. Choose two repos only with separate ownership, access, or trust boundaries.",
+        "next_step": "Confirm the library is intended to be public, add its explicit export boundary, then review six months of releases and dependency-size data before considering a split.",
+        "mode_used": "deep",
+        "failures": []
+      },
+      "grade": {
+        "total": 10,
+        "maxTotal": 10,
+        "criteria": {
+          "answers_question": {
+            "score": 2,
+            "note": "Picks one of the three offered options (keep one package) and ranks the alternatives with explicit promotion conditions, directly addressing the release-friction premise."
+          },
+          "specific_evidence": {
+            "score": 2,
+            "note": "The bin-without-exports manifest observation grounds the whole decision, alongside concrete split costs (publish ordering, version-range sync, dual changelogs, CI coordination) and semver bump mechanics per surface."
+          },
+          "non_obvious_risks": {
+            "score": 2,
+            "note": "Noticing the 'library' may not be publicly exported at all, that adding exports would freeze an unstable internal API as a public contract, and that two repos have 'no identified payer' are premise-challenging risks a generic answer misses."
+          },
+          "genuinely_simple": {
+            "score": 2,
+            "note": "Status quo plus an optional export field and grouped changelog headings — literally the smallest possible change, doable today."
+          },
+          "actionable_next_step": {
+            "score": 2,
+            "note": "Adding the export boundary is checkable now, and the six-month release/dependency-size review has explicit numeric triggers rather than a vague 'gather more data'."
+          }
+        },
+        "note": "Strong, premise-skeptical artifact; its next step opens by deferring a factual premise back to the user ('confirm the library is intended to be public') but pairs it with immediately checkable work and a bounded review."
+      },
+      "gradeError": null
+    }
+  ],
+  "aggregate": {
+    "allArtifactsValid": true,
+    "modesCovered": [
+      "lean",
+      "deep"
+    ],
+    "degradedRuns": 0,
+    "runsWithFailures": 0,
+    "meanGradeTotal": 10
+  },
+  "comparison": null
+}
