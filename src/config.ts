@@ -2,10 +2,10 @@ import { z } from "zod"
 
 export const DEFAULT_COUNCIL_PANEL_MODELS = [
   "openai/gpt-5.6-sol",
-  "opencode-go/kimi-k3",
+  "ollama-cloud/kimi-k3",
   "xai/grok-4.6",
 ]
-export const DEFAULT_COUNCIL_ROUTER_MODEL = "opencode-go/glm-5.3-flash"
+export const DEFAULT_COUNCIL_ROUTER_MODEL = "ollama-cloud/glm-5.3-flash"
 export const DEFAULT_COUNCIL_JUDGE_MODEL = "openai/gpt-5.6-sol"
 export const DEFAULT_COUNCIL_COMPOSER_MODEL = "openai/gpt-5.6-sol"
 

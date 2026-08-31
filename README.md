@@ -54,7 +54,7 @@ With per-plugin options:
 ```jsonc
 {
   "plugin": [
-    ["github:iamhenry/opencode-council", { "panelModels": ["openai/gpt-5.6-sol", "opencode-go/kimi-k3"], "mode": "deep" }]
+    ["github:iamhenry/opencode-council", { "panelModels": ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3"], "mode": "deep" }]
   ]
 }
 ```
@@ -78,8 +78,8 @@ In `opencode.json` (spec shown as the GitHub form; npm name works identically on
 {
   "plugin": [
     ["github:iamhenry/opencode-council", {
-      "panelModels": ["openai/gpt-5.6-sol", "opencode-go/kimi-k3", "xai/grok-4.6"],
-      "routerModel": "opencode-go/glm-5.3-flash",
+      "panelModels": ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3", "xai/grok-4.6"],
+      "routerModel": "ollama-cloud/glm-5.3-flash",
       "judgeModel": "openai/gpt-5.6-sol",
       "composerModel": "openai/gpt-5.6-sol",
       "variant": "high",

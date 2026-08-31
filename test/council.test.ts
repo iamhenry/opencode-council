@@ -172,8 +172,8 @@ async function run(mock: ReturnType<typeof makeMockClient>, args: Partial<Counci
 describe("config", () => {
   it("uses the production model defaults", () => {
     expect(parseConfig({})).toMatchObject({
-      panelModels: ["openai/gpt-5.6-sol", "opencode-go/kimi-k3", "xai/grok-4.6"],
-      routerModel: "opencode-go/glm-5.3-flash",
+      panelModels: ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3", "xai/grok-4.6"],
+      routerModel: "ollama-cloud/glm-5.3-flash",
       judgeModel: "openai/gpt-5.6-sol",
       composerModel: "openai/gpt-5.6-sol",
     })
