@@ -16,7 +16,7 @@
 export type CapabilityCase = {
   caseId: string
   slug: string
-  mode: "lean" | "deep" | "auto"
+  mode: "low" | "medium" | "auto"
   question: string
   context?: string
   seedFiles: Record<string, string>
@@ -28,7 +28,7 @@ export const CAPABILITY_CASES: CapabilityCase[] = [
   {
     caseId: "cap-migration-cutover",
     slug: "dashboard-analytics",
-    mode: "deep",
+    mode: "medium",
     question:
       "Our analytics dashboard reads from a Postgres replica that has grown to 800GB and slow queries are now p95 4s. Should we move the rollups into ClickHouse, add a Redis cache in front of Postgres, or pre-aggregate into hourly summary tables inside Postgres?",
     context:
@@ -55,7 +55,7 @@ export const CAPABILITY_CASES: CapabilityCase[] = [
   {
     caseId: "cap-schema-refactor",
     slug: "order-service-rename",
-    mode: "lean",
+    mode: "low",
     question:
       "We need to rename the orders.status column values from open/pending/done to created/processing/completed across 3 services that read this column. Should we do a big-bang migration with a coordinated deploy, or a dual-write transition period with both vocabularies in the DB?",
     context:
@@ -67,7 +67,7 @@ export const CAPABILITY_CASES: CapabilityCase[] = [
   {
     caseId: "cap-zero-downtime-index",
     slug: "invoices-backfill",
-    mode: "deep",
+    mode: "medium",
     question:
       "An invoices table with 120M rows needs a new NOT NULL column `currency_code` defaulting to 'USD', plus an index on it. Do we run CREATE INDEX CONCURRENTLY plus a batched backfill job, or take a maintenance window and do it in one ALTER TABLE?",
     context:
@@ -79,7 +79,7 @@ export const CAPABILITY_CASES: CapabilityCase[] = [
   {
     caseId: "cap-procedure-holdout",
     slug: "release-checklist-tool",
-    mode: "deep",
+    mode: "medium",
     question:
       "Releases from our monorepo keep missing steps: version bump, changelog, migration review, and smoke-run are all manual. Should we build a custom release CLI in-repo, adopt a semantic-release style bot, or write a plain checklist enforced by a required PR template?",
     context:

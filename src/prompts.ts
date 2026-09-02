@@ -7,7 +7,7 @@ const NO_MUTATION = `You are a read-only autonomous analyst. You MUST NOT edit, 
 
 const JSON_ONLY = `Respond with a single JSON object and nothing else. No prose before or after, no markdown fences.`
 
-export function leanPanelistPrompt(): string {
+export function lowPanelistPrompt(): string {
   return [
     NO_MUTATION,
     ``,
@@ -69,13 +69,13 @@ export function routerSystemPrompt(): string {
   return [
     NO_MUTATION,
     ``,
-    `You classify questions for a deliberation panel. "lean" uses 2 generalist panelists; "deep" uses a 3-role panel (architect, skeptic, pragmatist) and takes roughly twice as long.`,
+    `You classify questions for a deliberation panel. "low" uses 2 generalist panelists; "medium" uses a 3-role panel (architect, skeptic, pragmatist) and takes roughly twice as long.`,
     ``,
-    `Route to "deep" ONLY when the question clearly involves trade-offs across architecture, security, or long-term maintainability that generalists would likely miss. When uncertain, route to "lean".`,
+    `Route to "medium" ONLY when the question clearly involves trade-offs across architecture, security, or long-term maintainability that generalists would likely miss. When uncertain, route to "low".`,
     ``,
     JSON_ONLY,
     ``,
-    `Schema: {"mode": "lean" | "deep", "reason": "<one sentence>"}`,
+    `Schema: {"mode": "low" | "medium", "reason": "<one sentence>"}`,
   ].join("\n")
 }
 

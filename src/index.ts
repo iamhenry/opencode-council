@@ -26,7 +26,7 @@ export const CouncilPlugin: Plugin = async (input, options) => {
       council: tool({
         description: [
           "Convene a multi-model council to deliberate on a question and return a structured decision artifact.",
-          "Spawns independent read-only child sessions (2 panelists in lean mode; Architect/Skeptic/Pragmatist in deep mode), then a judge that weighs evidence — never a majority vote.",
+          "Spawns independent read-only child sessions (2 panelists in low mode; Architect/Skeptic/Pragmatist in medium mode), then a judge that weighs evidence — never a majority vote.",
           "Use for consequential decisions that benefit from independent model perspectives. Does not edit files or run commands.",
         ].join(" "),
         args: {
@@ -36,10 +36,10 @@ export const CouncilPlugin: Plugin = async (input, options) => {
             .optional()
             .describe("Optional current proposal, code excerpts, or background the panelists should consider."),
           mode: z
-            .enum(["auto", "lean", "deep"])
+            .enum(["auto", "low", "medium"])
             .default("auto")
             .describe(
-              "lean: 2 generalist panelists. deep: Architect + Skeptic + Pragmatist. auto: one router call classifies the question; uncertain routes lean.",
+              "low: 2 generalist panelists. medium: Architect + Skeptic + Pragmatist. auto: one router call classifies the question; uncertain routes low.",
             ),
           panel_models: z
             .array(z.string())
@@ -47,7 +47,7 @@ export const CouncilPlugin: Plugin = async (input, options) => {
             .max(3)
             .optional()
             .describe(
-              'Per-call panel model overrides as "provider/model" (2 for lean, 3 for deep). Must be distinct model IDs available from authenticated providers.',
+              'Per-call panel model overrides as "provider/model" (2 for low, 3 for medium). Must be distinct model IDs available from authenticated providers.',
             ),
           router_model: z
             .string()

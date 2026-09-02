@@ -9,8 +9,8 @@ export type HarnessCase = {
   caseId: string
   /** Project-shaped workspace directory name — the only path label a run sees. */
   slug: string
-  /** lean/deep are requested explicitly; auto exercises the router. */
-  mode: "lean" | "deep" | "auto"
+  /** low/medium are requested explicitly; auto exercises the router. */
+  mode: "low" | "medium" | "auto"
   question: string
   context?: string
   /** Files seeded into the sanitized workspace so it looks like a real project. */
@@ -21,7 +21,7 @@ export const CASES: HarnessCase[] = [
   {
     caseId: "streak-storage",
     slug: "streak-tracker-cli",
-    mode: "lean",
+    mode: "low",
     question:
       "I'm building a tiny habit-streak tracker that runs in the terminal. Should streak data live in a plain JSON file or a SQLite database? Expect a few hundred entries per person, one machine, no syncing planned.",
     context: "Solo project, TypeScript, ships as a single npm package.",
@@ -37,7 +37,7 @@ export const CASES: HarnessCase[] = [
   {
     caseId: "accounts-auth",
     slug: "note-app-accounts",
-    mode: "deep",
+    mode: "medium",
     question:
       "We're adding user accounts to our note-taking web app. Should we build session auth ourselves with cookies, or adopt an auth library like Better Auth? Team of two, shipping weekly, a few thousand users expected in year one, and we need email plus Google sign-in.",
     context:

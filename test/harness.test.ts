@@ -32,9 +32,9 @@ describe("blinding", () => {
     expect(CASES.length).toBeLessThanOrEqual(3)
   })
 
-  it("cases cover lean and deep", () => {
-    expect(CASES.some((c) => c.mode === "lean")).toBe(true)
-    expect(CASES.some((c) => c.mode === "deep")).toBe(true)
+  it("cases cover low and medium", () => {
+    expect(CASES.some((c) => c.mode === "low")).toBe(true)
+    expect(CASES.some((c) => c.mode === "medium")).toBe(true)
     expect(CASES.some((c) => c.mode === "auto")).toBe(true)
   })
 })
@@ -143,7 +143,7 @@ function fakeReport(cases: CaseResult[]): ReturnType<typeof buildReport> {
 
 describe("report shape", () => {
   it("has stable top-level sections with timestamps isolated from comparison fields", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean")])
+    const report = fakeReport([fakeCase("a", 8, "low")])
     expect(Object.keys(report)).toEqual(["harness", "council", "run", "cases", "aggregate", "comparison"])
     expect(report.harness.schema).toBe(1)
     expect(report.council.version).toBeTruthy()
@@ -152,12 +152,12 @@ describe("report shape", () => {
     expect(report.run.durationMs).toBe(300_000)
     expect(report.comparison).toBeNull()
     expect(report.aggregate.allArtifactsValid).toBe(true)
-    expect(report.aggregate.modesCovered).toEqual(["lean"])
+    expect(report.aggregate.modesCovered).toEqual(["low"])
     expect(report.aggregate.meanGradeTotal).toBe(8)
   })
 
   it("mean grade is null when any case is ungraded", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean"), fakeCase("b", null, null)])
+    const report = fakeReport([fakeCase("a", 8, "low"), fakeCase("b", null, null)])
     expect(report.aggregate.meanGradeTotal).toBeNull()
     expect(report.aggregate.allArtifactsValid).toBe(false)
   })
@@ -169,14 +169,14 @@ describe("baseline comparison", () => {
     council: { version: "0.1.1", commit: "abc123" },
     run: { startedAt: "2026-08-30T09:00:00.000Z" },
     cases: [
-      { caseId: "a", machine: fakeCase("a", 8, "lean").machine, grade: { total: 8 } },
-      { caseId: "b", machine: fakeCase("b", 6, "deep").machine, grade: { total: 6 } },
+      { caseId: "a", machine: fakeCase("a", 8, "low").machine, grade: { total: 8 } },
+      { caseId: "b", machine: fakeCase("b", 6, "medium").machine, grade: { total: 6 } },
     ],
-    aggregate: { allArtifactsValid: true, modesCovered: ["lean", "deep"], degradedRuns: 0, runsWithFailures: 0, meanGradeTotal: 7 },
+    aggregate: { allArtifactsValid: true, modesCovered: ["low", "medium"], degradedRuns: 0, runsWithFailures: 0, meanGradeTotal: 7 },
   }
 
   it("reports same/better/worse verdicts per case and in aggregate", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean"), fakeCase("b", 4, "deep")])
+    const report = fakeReport([fakeCase("a", 8, "low"), fakeCase("b", 4, "medium")])
     const cmp = compareToBaseline(report, baseline)
     expect(cmp.perCase[0]!.gradeTotal.verdict).toBe("same")
     expect(cmp.perCase[1]!.gradeTotal.verdict).toBe("worse")
@@ -185,7 +185,7 @@ describe("baseline comparison", () => {
   })
 
   it("handles new cases and ungraded runs without pretending significance", () => {
-    const report = fakeReport([fakeCase("a", 9, "lean"), fakeCase("new", null, null)])
+    const report = fakeReport([fakeCase("a", 9, "low"), fakeCase("new", null, null)])
     const cmp = compareToBaseline(report, baseline)
     expect(cmp.perCase[0]!.gradeTotal.verdict).toBe("better")
     expect(cmp.perCase[1]!.gradeTotal.verdict).toBe("no-baseline")
@@ -194,7 +194,7 @@ describe("baseline comparison", () => {
   })
 
   it("flags commit drift between baseline and current run", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean")])
+    const report = fakeReport([fakeCase("a", 8, "low")])
     const cmp = compareToBaseline(report, { ...baseline, council: { version: "0.1.1", commit: "def456" } })
     expect(cmp.commitChanged).toBe(true)
   })
@@ -219,8 +219,8 @@ describe("model drift comparison", () => {
     harness: { name: "opencode-council-quality-run", schema: 1 },
     council: { version: "0.1.1", commit: "abc123" },
     run: { startedAt: "2026-08-30T09:00:00.000Z" },
-    cases: [{ caseId: "a", machine: fakeCase("a", 8, "lean").machine, grade: { total: 8 } }],
-    aggregate: { allArtifactsValid: true, modesCovered: ["lean"], degradedRuns: 0, runsWithFailures: 0, meanGradeTotal: 8 },
+    cases: [{ caseId: "a", machine: fakeCase("a", 8, "low").machine, grade: { total: 8 } }],
+    aggregate: { allArtifactsValid: true, modesCovered: ["low"], degradedRuns: 0, runsWithFailures: 0, meanGradeTotal: 8 },
   }
   const baselineWithModels: Baseline = {
     ...base,
@@ -228,7 +228,7 @@ describe("model drift comparison", () => {
   }
 
   it("reports no drift when model identities match", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean")])
+    const report = fakeReport([fakeCase("a", 8, "low")])
     const cmp = compareToBaseline(report, baselineWithModels)
     expect(cmp.models.changed).toBe(false)
     expect(cmp.models.comparable).toBe(true)
@@ -237,7 +237,7 @@ describe("model drift comparison", () => {
   })
 
   it("flags changed identities and warns grade deltas are not comparable", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean")])
+    const report = fakeReport([fakeCase("a", 8, "low")])
     const cmp = compareToBaseline(report, { ...baselineWithModels, council: { ...baselineWithModels.council, models: { ...models, grader: "d/v" } } })
     expect(cmp.models.changed).toBe(true)
     expect(cmp.models.comparable).toBe(false)
@@ -247,7 +247,7 @@ describe("model drift comparison", () => {
   })
 
   it("treats a baseline without recorded models as not comparable", () => {
-    const report = fakeReport([fakeCase("a", 8, "lean")])
+    const report = fakeReport([fakeCase("a", 8, "low")])
     const cmp = compareToBaseline(report, base)
     expect(cmp.models.changed).toBe(false)
     expect(cmp.models.comparable).toBe(false)

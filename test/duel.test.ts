@@ -222,8 +222,8 @@ describe("tallyCase / tallyAll", () => {
 
 const passingRegression = (caseId: string) => ({
   caseId,
-  modeRequested: "deep",
-  machine: { artifactSchemaValid: true, modeUsed: "deep", degradation: null, failures: [] as string[] },
+  modeRequested: "medium",
+  machine: { artifactSchemaValid: true, modeUsed: "medium", degradation: null, failures: [] as string[] },
 })
 
 function tallyWith(wins: number, losses: number): Record<string, ReturnType<typeof tallyCase>> {
@@ -272,7 +272,7 @@ describe("promotionGate", () => {
 
   it("blocks on regression mode mismatch and degradation", () => {
     const mismatch = passingRegression("r1")
-    mismatch.machine.modeUsed = "lean"
+    mismatch.machine.modeUsed = "low"
     const degraded = passingRegression("r2")
     degraded.machine.degradation = "panel shrank"
     const gate = promotionGate({
@@ -283,10 +283,10 @@ describe("promotionGate", () => {
     expect(gate.promoted).toBe(false)
   })
 
-  it("accepts lean or deep as the resolved mode for an auto regression case", () => {
+  it("accepts low or medium as the resolved mode for an auto regression case", () => {
     const auto = passingRegression("auto")
     auto.modeRequested = "auto"
-    auto.machine.modeUsed = "lean"
+    auto.machine.modeUsed = "low"
     const gate = promotionGate({
       regressionResults: [auto],
       capabilityTallies: { ...tallyWith(2, 0), "cap-hold": tallyWith(10, 0)["cap-dummy"]! },

@@ -222,7 +222,7 @@ export function promotionGate(input: {
 
   const passesRegression = (r: (typeof input.regressionResults)[number]) =>
     r.machine.artifactSchemaValid &&
-    (r.modeRequested === "auto" ? r.machine.modeUsed === "lean" || r.machine.modeUsed === "deep" : r.machine.modeUsed === r.modeRequested) &&
+    (r.modeRequested === "auto" ? r.machine.modeUsed === "low" || r.machine.modeUsed === "medium" : r.machine.modeUsed === r.modeRequested) &&
     r.machine.degradation === null &&
     r.machine.failures.length === 0
   const regressionPass = input.regressionResults.every(passesRegression)

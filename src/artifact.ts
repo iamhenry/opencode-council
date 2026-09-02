@@ -17,7 +17,7 @@ export const DecisionArtifactSchema = z.object({
   change_my_mind_evidence: z.string().min(1),
   next_step: z.string().min(1),
   /** Filled by the tool, not the judge; validated permissively. */
-  mode_used: z.enum(["lean", "deep"]).optional(),
+  mode_used: z.enum(["low", "medium"]).optional(),
   /** "ok" | "degraded" — filled by the tool. */
   degradation: z.string().optional(),
   /** Disclosed failures — filled by the tool. */

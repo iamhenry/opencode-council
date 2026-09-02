@@ -5,11 +5,11 @@ import type { CouncilClient, ModelRef, PromptResult } from "./opencode.js"
 import { routerSystemPrompt, routerUserPrompt } from "./prompts.js"
 
 const RouterOutput = z.object({
-  mode: z.enum(["lean", "deep"]),
+  mode: z.enum(["low", "medium"]),
   reason: z.string().default(""),
 })
 
-export type Route = { mode: "lean" | "deep"; reason: string; routerFailed?: boolean }
+export type Route = { mode: "low" | "medium"; reason: string; routerFailed?: boolean }
 
 export async function runRouter(input: {
   client: CouncilClient
@@ -22,7 +22,7 @@ export async function runRouter(input: {
   timeoutMs: number
   systemPrompt?: string
 }): Promise<Route> {
-  // Cancellation must propagate, never become a lean-route fallback.
+  // Cancellation must propagate, never become a low-route fallback.
   if (input.signal.aborted) throw new CancelledError("cancelled")
   try {
     const sessionID = await input.client.createChildSession(`Council — mode router`, input.parentID)
@@ -41,12 +41,12 @@ export async function runRouter(input: {
       () => input.client.abort(sessionID),
     )
     const parsed = RouterOutput.safeParse(extractJson(res.text))
-    if (!parsed.success) return { mode: "lean", reason: "router returned unparseable output; defaulted to lean", routerFailed: true }
+    if (!parsed.success) return { mode: "low", reason: "router returned unparseable output; defaulted to low", routerFailed: true }
     return parsed.data
   } catch (err) {
     if (err instanceof CancelledError) throw err
-    // Uncertain router → lean. Never let router failure kill the council.
-    return { mode: "lean", reason: `router failed (${String(err)}); defaulted to lean`, routerFailed: true }
+    // Uncertain router → low. Never let router failure kill the council.
+    return { mode: "low", reason: `router failed (${String(err)}); defaulted to low`, routerFailed: true }
   }
 }
 

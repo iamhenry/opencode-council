@@ -7,7 +7,7 @@ import { resolveCouncilModels, CouncilModelError } from "./models.js"
 import { runRouter, runPanelist, CancelledError } from "./panel.js"
 import {
   architectPrompt,
-  leanPanelistPrompt,
+  lowPanelistPrompt,
   panelUserPrompt,
   pragmatistPrompt,
   skepticPrompt,
@@ -17,7 +17,7 @@ import type { CouncilClient } from "./opencode.js"
 export type CouncilToolArgs = {
   question: string
   context?: string
-  mode: "auto" | "lean" | "deep"
+  mode: "auto" | "low" | "medium"
   panel_models?: string[]
   router_model?: string
   judge_model?: string
@@ -25,24 +25,24 @@ export type CouncilToolArgs = {
 
 export type PanelistFailure = { role: string; model: string; error: string }
 
-const ROLES: Record<"lean" | "deep", { role: string; system: () => string }[]> = {
-  // Lean: two independent generalist panelists with equivalent inputs.
-  lean: [
-    { role: "Panelist", system: leanPanelistPrompt },
-    { role: "Panelist", system: leanPanelistPrompt },
+const ROLES: Record<"low" | "medium", { role: string; system: () => string }[]> = {
+  // Low: two independent generalist panelists with equivalent inputs.
+  low: [
+    { role: "Panelist", system: lowPanelistPrompt },
+    { role: "Panelist", system: lowPanelistPrompt },
   ],
-  deep: [
+  medium: [
     { role: "Architect", system: architectPrompt },
     { role: "Skeptic", system: skepticPrompt },
     { role: "Pragmatist", system: pragmatistPrompt },
   ],
 }
 
-const ROUTER_SYSTEM = `You classify questions for a deliberation panel. "lean" uses 2 generalist panelists; "deep" uses a 3-role panel (Architect, Skeptic, Pragmatist) and takes roughly twice as long.
+const ROUTER_SYSTEM = `You classify questions for a deliberation panel. "low" uses 2 generalist panelists; "medium" uses a 3-role panel (Architect, Skeptic, Pragmatist) and takes roughly twice as long.
 
-Route to "deep" ONLY when the question clearly involves trade-offs across architecture, security, or long-term maintainability that generalists would likely miss. When uncertain, route to "lean".
+Route to "medium" ONLY when the question clearly involves trade-offs across architecture, security, or long-term maintainability that generalists would likely miss. When uncertain, route to "low".
 
-Respond with a single JSON object and nothing else: {"mode": "lean" | "deep", "reason": "<one sentence>"}`
+Respond with a single JSON object and nothing else: {"mode": "low" | "medium", "reason": "<one sentence>"}`
 
 export type CouncilOutcome = {
   artifact: DecisionArtifact
@@ -72,37 +72,37 @@ export async function runCouncil(
   }
 
   // Mode: explicit wins; auto makes exactly one dedicated structured router
-  // call, and uncertain/failed routing falls back to lean.
-  let mode: "lean" | "deep"
+  // call, and uncertain/failed routing falls back to low.
+  let mode: "low" | "medium"
   let modeReason: string
   if (args.mode !== "auto") {
     mode = args.mode
     modeReason = "explicitly requested"
   } else {
-    const leanMin = await resolveCouncilModels(client, effectiveConfig, 2)
+    const lowMin = await resolveCouncilModels(client, effectiveConfig, 2)
     const route = await runRouter({
       client,
       parentID: parentSessionID,
-      model: leanMin.router!,
-      supportsVariant: leanMin.router!.supportsVariant,
+      model: lowMin.router!,
+      supportsVariant: lowMin.router!.supportsVariant,
       variant: config.variant,
       question: args.question,
       signal,
       timeoutMs: Math.min(config.timeoutMs, 60_000),
       systemPrompt: ROUTER_SYSTEM,
     })
-    if (route.mode === "deep" && effectiveConfig.panelModels && effectiveConfig.panelModels.length < 3) {
-      // Only 2 panel models configured: deep needs 3 distinct roles, so stay
-      // lean instead of guessing a third model.
-      mode = "lean"
-      modeReason = `router chose deep but only 2 panel models configured; kept lean`
+    if (route.mode === "medium" && effectiveConfig.panelModels && effectiveConfig.panelModels.length < 3) {
+      // Only 2 panel models configured: medium needs 3 distinct roles, so stay
+      // low instead of guessing a third model.
+      mode = "low"
+      modeReason = `router chose medium but only 2 panel models configured; kept low`
     } else {
       mode = route.mode
       modeReason = route.reason
     }
   }
 
-  const roleCount = mode === "deep" ? 3 : 2
+  const roleCount = mode === "medium" ? 3 : 2
   // Routing is complete (or was explicitly skipped), so do not validate an
   // unused router while resolving the panel and judge.
   const models = await resolveCouncilModels(client, effectiveConfig, roleCount, { router: false })

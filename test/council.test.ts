@@ -31,7 +31,7 @@ function validArtifactJson(extra: Record<string, unknown> = {}): string {
 }
 
 function isRouterSystem(system: string): boolean {
-  return system.includes('{"mode": "lean" | "deep"')
+  return system.includes('{"mode": "low" | "medium"')
 }
 function isJudgeSystem(system: string): boolean {
   return system.includes("You are the JUDGE")
@@ -39,7 +39,7 @@ function isJudgeSystem(system: string): boolean {
 
 type MockOptions = {
   models?: AvailableModel[]
-  routerMode?: "lean" | "deep"
+  routerMode?: "low" | "medium"
   panelistText?: (role: string, call: PromptCall) => string
   judgeText?: (call: PromptCall) => string
   failSessionTitles?: RegExp
@@ -104,7 +104,7 @@ function makeMockClient(opts: MockOptions = {}) {
       if (isRouterSystem(spec.system)) {
         return {
           sessionID: spec.sessionID,
-          text: JSON.stringify({ mode: opts.routerMode ?? "lean", reason: "test reason" }),
+          text: JSON.stringify({ mode: opts.routerMode ?? "low", reason: "test reason" }),
         }
       }
       if (isJudgeSystem(spec.system)) {
@@ -154,7 +154,7 @@ async function run(mock: ReturnType<typeof makeMockClient>, args: Partial<Counci
   return runCouncil(
     mock.client,
     CONFIG,
-    { question: "Which database should we pick?", mode: "lean", ...args },
+    { question: "Which database should we pick?", mode: "low", ...args },
     "parent-1",
     new AbortController().signal,
   )
@@ -205,7 +205,7 @@ describe("model resolution", () => {
       resolveCouncilModels(mock.client, { ...CONFIG, panelModels: ["p1/nope", "p1/alpha"] }, 2),
     ).rejects.toThrow(/not available.*Available models/)
   })
-  it("requires 3 configured panel models for deep mode", async () => {
+  it("requires 3 configured panel models for medium mode", async () => {
     const mock = makeMockClient()
     await expect(
       resolveCouncilModels(mock.client, { ...CONFIG, panelModels: ["p1/alpha", "p1/beta"] }, 3),
@@ -225,14 +225,14 @@ describe("model resolution", () => {
 })
 
 describe("routing", () => {
-  it("explicit lean skips the router entirely", async () => {
+  it("explicit low skips the router entirely", async () => {
     const mock = makeMockClient()
-    await run(mock, { mode: "lean" })
+    await run(mock, { mode: "low" })
     expect(mock.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(0)
   })
-  it("explicit deep overrides the router", async () => {
-    const mock = makeMockClient({ routerMode: "lean" })
-    await run(mock, { mode: "deep" })
+  it("explicit medium overrides the router", async () => {
+    const mock = makeMockClient({ routerMode: "low" })
+    await run(mock, { mode: "medium" })
     expect(mock.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(0)
     expect(mock.titles().filter((t) => t.includes("panelist"))).toHaveLength(3)
   })
@@ -242,11 +242,11 @@ describe("routing", () => {
     const res = await runCouncil(
       mock.client,
       config,
-      { question: "q?", mode: "lean" },
+      { question: "q?", mode: "low" },
       "parent-1",
       new AbortController().signal,
     )
-    expect(res.artifact.mode_used).toBe("lean")
+    expect(res.artifact.mode_used).toBe("low")
     expect(mock.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(0)
   })
   it("per-call models override panel, router, and judge without changing defaults", async () => {
@@ -271,25 +271,25 @@ describe("routing", () => {
       /router model.*not available/,
     )
     const judgeMock = makeMockClient()
-    await expect(run(judgeMock, { mode: "lean", judge_model: "p1/unavailable" })).rejects.toThrow(
+    await expect(run(judgeMock, { mode: "low", judge_model: "p1/unavailable" })).rejects.toThrow(
       /judge model.*not available/,
     )
   })
   it("auto makes exactly one dedicated router call and routes by its output", async () => {
-    const mock = makeMockClient({ routerMode: "deep" })
+    const mock = makeMockClient({ routerMode: "medium" })
     await run(mock, { mode: "auto" })
     const routerCalls = mock.promptCalls.filter((c) => isRouterSystem(c.system))
     expect(routerCalls).toHaveLength(1)
     expect(routerCalls[0]!.spec.model).toMatchObject({ providerID: "p1", modelID: "alpha" })
     expect(mock.titles().filter((t) => t.includes("Architect"))).toHaveLength(1)
   })
-  it("auto with failed/uncertain router falls back to lean and discloses", async () => {
+  it("auto with failed/uncertain router falls back to low and discloses", async () => {
     const mock = makeMockClient()
     // Router model is p1/alpha; make router calls throw via hang? Simpler: fail router by
     // making its session title fail.
     const mock2 = makeMockClient({ failSessionTitles: /mode router/ })
     const res = await run(mock2, { mode: "auto" })
-    expect(res.artifact.mode_used).toBe("lean")
+    expect(res.artifact.mode_used).toBe("low")
     expect(res.artifact.degradation).toBeUndefined() // router fallback is not panel degradation
     expect(mock2.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(1)
     void mock
@@ -297,17 +297,17 @@ describe("routing", () => {
 })
 
 describe("role counts and parallel independence", () => {
-  it("lean runs exactly 2 panelists with equivalent inputs", async () => {
+  it("low runs exactly 2 panelists with equivalent inputs", async () => {
     const mock = makeMockClient()
-    await run(mock, { mode: "lean" })
+    await run(mock, { mode: "low" })
     const panelists = mock.promptCalls.filter((c) => !isRouterSystem(c.system) && !isJudgeSystem(c.system))
     expect(panelists).toHaveLength(2)
     expect(panelists[0]!.message).toBe(panelists[1]!.message)
     expect(new Set(panelists.map((p) => p.model.modelID))).toEqual(new Set(["alpha", "beta"]))
   })
-  it("deep runs Architect, Skeptic, Pragmatist with equivalent inputs", async () => {
+  it("medium runs Architect, Skeptic, Pragmatist with equivalent inputs", async () => {
     const mock = makeMockClient()
-    await run(mock, { mode: "deep" })
+    await run(mock, { mode: "medium" })
     const panelists = mock.promptCalls.filter((c) => !isRouterSystem(c.system) && !isJudgeSystem(c.system))
     expect(panelists).toHaveLength(3)
     expect(panelists.map((p) => p.system)).toEqual(
@@ -331,14 +331,14 @@ describe("role counts and parallel independence", () => {
         return "independent take"
       },
     })
-    const res = await run(mock, { mode: "lean" })
+    const res = await run(mock, { mode: "low" })
     expect(issued).toBe(2)
     expect(mock.promptCalls.filter((c) => !isRouterSystem(c.system) && !isJudgeSystem(c.system))).toHaveLength(2)
     void res
   })
   it("panelists cannot see each other: no cross-session visibility in inputs", async () => {
     const mock = makeMockClient()
-    await run(mock, { mode: "deep" })
+    await run(mock, { mode: "medium" })
     const panelists = mock.promptCalls.filter((c) => !isRouterSystem(c.system) && !isJudgeSystem(c.system))
     for (const p of panelists) {
       expect(p.message).not.toContain("says:") // no other panelist's response embedded
@@ -352,9 +352,9 @@ describe("judge payload and artifact", () => {
   it("judge receives full panelist responses attributed by role", async () => {
     const mock = makeMockClient({
       panelistText: (role) => `UNIQUE-${role}-TAKE`,
-      routerMode: "deep",
+      routerMode: "medium",
     })
-    const res = await run(mock, { mode: "deep" })
+    const res = await run(mock, { mode: "medium" })
     const judge = mock.promptCalls.find((c) => isJudgeSystem(c.system))!
     expect(judge.message).toContain("UNIQUE-Architect-TAKE")
     expect(judge.message).toContain("UNIQUE-Skeptic-TAKE")
@@ -362,7 +362,7 @@ describe("judge payload and artifact", () => {
     expect(judge.system).toContain("Panel roles, in order: Architect, Skeptic, Pragmatist")
     expect(judge.system).toMatch(/not take majority votes/i)
     expect(res.artifact.recommendation).toBe("Use option A")
-    expect(res.artifact.mode_used).toBe("deep")
+    expect(res.artifact.mode_used).toBe("medium")
   })
   it("judge output passes schema validation; invalid fields are rejected", () => {
     expect(parseArtifact(validArtifactJson()).ok).toBe(true)
@@ -378,7 +378,7 @@ describe("judge payload and artifact", () => {
     const mock = makeMockClient({
       judgeText: () => (judgeCalls++ === 0 ? "I will not answer in JSON" : validArtifactJson()),
     })
-    const res = await run(mock, { mode: "lean" })
+    const res = await run(mock, { mode: "low" })
     expect(res.artifact.recommendation).toBe("Use option A")
     const judgeCallsMade = mock.promptCalls.filter((c) => isJudgeSystem(c.system))
     expect(judgeCallsMade).toHaveLength(2)
@@ -386,10 +386,10 @@ describe("judge payload and artifact", () => {
   })
   it("judge failing twice throws with the validation error", async () => {
     const mock = makeMockClient({ judgeText: () => "still no json" })
-    await expect(run(mock, { mode: "lean" })).rejects.toThrow(/repair attempt/)
+    await expect(run(mock, { mode: "low" })).rejects.toThrow(/repair attempt/)
   })
   it("artifact renders all required sections", () => {
-    const artifact = JSON.parse(validArtifactJson({ mode_used: "lean" }))
+    const artifact = JSON.parse(validArtifactJson({ mode_used: "low" }))
     const md = renderArtifact(artifact)
     for (const section of [
       "Recommendation",
@@ -411,25 +411,25 @@ describe("judge payload and artifact", () => {
 
 describe("session isolation and permissions", () => {
   it("creates clearly titled child sessions under the parent", async () => {
-    const leanMock = makeMockClient()
-    await run(leanMock, { mode: "lean" })
-    const leanTitles = leanMock.titles()
-    expect(leanTitles.some((t) => t.startsWith("Council — lean panelist 1 Panelist"))).toBe(true)
-    expect(leanTitles.some((t) => t.startsWith("Council — lean panelist 2 Panelist"))).toBe(true)
-    expect(leanTitles.some((t) => t.startsWith("Council — judge ("))).toBe(true)
-    const deepMock = makeMockClient()
-    await run(deepMock, { mode: "deep" })
-    const deepTitles = deepMock.titles()
-    expect(deepTitles.some((t) => t.startsWith("Council — deep panelist 1 Architect"))).toBe(true)
-    expect(deepTitles.some((t) => t.startsWith("Council — deep panelist 2 Skeptic"))).toBe(true)
-    expect(deepTitles.some((t) => t.startsWith("Council — deep panelist 3 Pragmatist"))).toBe(true)
+    const lowMock = makeMockClient()
+    await run(lowMock, { mode: "low" })
+    const lowTitles = lowMock.titles()
+    expect(lowTitles.some((t) => t.startsWith("Council — low panelist 1 Panelist"))).toBe(true)
+    expect(lowTitles.some((t) => t.startsWith("Council — low panelist 2 Panelist"))).toBe(true)
+    expect(lowTitles.some((t) => t.startsWith("Council — judge ("))).toBe(true)
+    const mediumMock = makeMockClient()
+    await run(mediumMock, { mode: "medium" })
+    const mediumTitles = mediumMock.titles()
+    expect(mediumTitles.some((t) => t.startsWith("Council — medium panelist 1 Architect"))).toBe(true)
+    expect(mediumTitles.some((t) => t.startsWith("Council — medium panelist 2 Skeptic"))).toBe(true)
+    expect(mediumTitles.some((t) => t.startsWith("Council — medium panelist 3 Pragmatist"))).toBe(true)
     const autoMock = makeMockClient()
     await run(autoMock, { mode: "auto" })
     expect(autoMock.titles()).toContain("Council — mode router")
   })
   it("every prompt denies mutating and agentic tools and allows only read-only tools", async () => {
     const mock = makeMockClient()
-    await run(mock, { mode: "deep" })
+    await run(mock, { mode: "medium" })
     expect(mock.promptCalls.length).toBeGreaterThan(0)
     for (const call of mock.promptCalls) {
       const tools = call.spec.tools ?? {}
@@ -502,7 +502,7 @@ describe("session isolation and permissions", () => {
 describe("partial failure and degradation", () => {
   it("one failed panelist yields a degraded result with disclosed failure", async () => {
     const mock = makeMockClient({ failSessionTitles: /Skeptic/ })
-    const res = await run(mock, { mode: "deep" })
+    const res = await run(mock, { mode: "medium" })
     expect(res.artifact.degradation).toMatch(/degraded: 1 of 3 panelists failed/)
     expect(res.artifact.failures).toHaveLength(1)
     expect(res.artifact.failures![0]).toContain("Skeptic")
@@ -510,14 +510,14 @@ describe("partial failure and degradation", () => {
   })
   it("judge is told about failed panelists", async () => {
     const mock = makeMockClient({ failSessionTitles: /panelist 1 Panelist \(p1\/alpha\)/ })
-    await run(mock, { mode: "lean" })
+    await run(mock, { mode: "low" })
     const judge = mock.promptCalls.find((c) => isJudgeSystem(c.system))!
     expect(judge.message).toContain("Panelist failures")
     expect(judge.message).toContain("mock failure")
   })
   it("all panelists failing throws with all failures listed", async () => {
     const mock = makeMockClient({ failSessionTitles: /panelist/ })
-    await expect(run(mock, { mode: "lean" })).rejects.toThrow(/failed completely.*Panelist.*mock failure/s)
+    await expect(run(mock, { mode: "low" })).rejects.toThrow(/failed completely.*Panelist.*mock failure/s)
   })
 })
 
@@ -528,7 +528,7 @@ describe("cancellation and timeouts", () => {
     const res = await runCouncil(
       mock.client,
       config,
-      { question: "q?", mode: "deep" },
+      { question: "q?", mode: "medium" },
       "parent-1",
       new AbortController().signal,
     )
@@ -550,7 +550,7 @@ describe("cancellation and timeouts", () => {
       const res = await runCouncil(
         mock.client,
         config,
-        { question: "q?", mode: "deep" },
+        { question: "q?", mode: "medium" },
         "parent-1",
         new AbortController().signal,
       )
@@ -572,7 +572,7 @@ describe("cancellation and timeouts", () => {
     const promise = runCouncil(
       mock.client,
       CONFIG,
-      { question: "q?", mode: "deep" },
+      { question: "q?", mode: "medium" },
       "parent-1",
       ac.signal,
     )

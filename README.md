@@ -7,12 +7,12 @@ The `council` tool spawns fresh, read-only child sessions — panelists that del
 ## How it works
 
 ```
-question ──▶ [auto? router: lean|deep] ──▶ panelists (parallel, independent) ──▶ judge ──▶ decision artifact
+question ──▶ [auto? router: low|medium] ──▶ panelists (parallel, independent) ──▶ judge ──▶ decision artifact
 ```
 
-- **lean** — 2 independent generalist panelists + judge. Fast.
-- **deep** — Architect, Skeptic, Pragmatist (parallel, mutually blind) + judge. Thorough.
-- **auto** (default) — exactly one dedicated structured router call classifies the question; when uncertain (or the router fails), it routes **lean**.
+- **low** — 2 independent generalist panelists + judge. Fast.
+- **medium** — Architect, Skeptic, Pragmatist (parallel, mutually blind) + judge. Thorough.
+- **auto** (default) — exactly one dedicated structured router call classifies the question; when uncertain (or the router fails), it routes **low**.
 - The judge selects and weighs **evidence**, attributes it by role, and discloses disagreements, risks, blind spots, and the simplest viable option.
 - If any panelist fails, the council **continues with the survivors** and marks the result `degraded`, disclosing every failure. If all panelists fail, the tool errors with the failure details.
 
@@ -23,7 +23,7 @@ Every run returns a validated object containing: `recommendation`, `confidence`,
 ## Safety
 
 - All internal sessions **deny** `edit`, `write`, `patch`, `bash`, and `task` — the council never mutates your repo. Only read-only inspection tools (`read`, `grep`, `glob`, `list`, `webfetch`) are enabled.
-- Child sessions are clearly titled (`Council — deep panelist 2 Skeptic (provider/model)`) for audit.
+- Child sessions are clearly titled (`Council — medium panelist 2 Skeptic (provider/model)`) for audit.
 - Cancellation and per-stage timeouts propagate: timed-out or cancelled panelists are **aborted**, disclosed as failures, and never block the run.
 
 ## Install
@@ -53,7 +53,7 @@ With per-plugin options:
 ```jsonc
 {
   "plugin": [
-    ["github:iamhenry/opencode-council", { "panelModels": ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3"], "mode": "deep" }]
+    ["github:iamhenry/opencode-council", { "panelModels": ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3"] }]
   ]
 }
 ```
@@ -91,19 +91,19 @@ All options are optional:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `panelModels` | Sol 5.6, Kimi K3, Grok 4.6 | Lean uses the first 2; deep uses all 3. Must be distinct model IDs. |
+| `panelModels` | Sol 5.6, Kimi K3, Grok 4.6 | Low uses the first 2; medium uses all 3. Must be distinct model IDs. |
 | `routerModel` | GLM 5.3 Flash | Router (auto mode) model. `smallModel` remains an optional custom fallback. |
 | `judgeModel` | Sol 5.6 | Judge may overlap panel models. |
 | `variant` | none | Reasoning variant (e.g. `"high"`) — sent **only** to models reporting reasoning support. |
 | `timeoutMs` | `180000` | Per-stage timeout (router capped at 60s). |
 
-Precedence is built-in defaults → plugin config → per-call tool overrides. Pass `panel_models`, `router_model`, or `judge_model` for one call; explicit `lean`/`deep` mode does not resolve or invoke a router.
+Precedence is built-in defaults → plugin config → per-call tool overrides. Pass `panel_models`, `router_model`, or `judge_model` for one call; explicit `low`/`medium` mode does not resolve or invoke a router.
 
 ## Use
 
 Ask your agent to call the `council` tool:
 
-- "Use the council tool in deep mode: should we migrate from Postgres to SQLite for the edge deploy? Context: <…>"
+- "Use the council tool in medium mode: should we migrate from Postgres to SQLite for the edge deploy? Context: <…>"
 - "Run council (auto) on which caching layer to adopt."
 
 ## Quality baseline (blind harness)

@@ -9,7 +9,7 @@ export const DEFAULT_COUNCIL_ROUTER_MODEL = "ollama-cloud/glm-5.3-flash"
 export const DEFAULT_COUNCIL_JUDGE_MODEL = "openai/gpt-5.6-sol"
 
 export const CouncilConfigSchema = z.object({
-  /** Panel models as "provider/model". 2 for lean, 3 for deep. Must be distinct model IDs. */
+  /** Panel models as "provider/model". 2 for low, 3 for medium. Must be distinct model IDs. */
   panelModels: z.array(z.string().min(1)).min(2).max(3).default([...DEFAULT_COUNCIL_PANEL_MODELS]),
   /** Router (auto mode) model. */
   routerModel: z.string().min(1).default(DEFAULT_COUNCIL_ROUTER_MODEL),
