@@ -7,7 +7,6 @@ import { resolveCouncilModels, CouncilModelError } from "./models.js"
 import { runRouter, runPanelist, CancelledError } from "./panel.js"
 import {
   architectPrompt,
-  composerSystemPrompt,
   leanPanelistPrompt,
   panelUserPrompt,
   pragmatistPrompt,
@@ -20,6 +19,8 @@ export type CouncilToolArgs = {
   context?: string
   mode: "auto" | "lean" | "deep"
   panel_models?: string[]
+  router_model?: string
+  judge_model?: string
 }
 
 export type PanelistFailure = { role: string; model: string; error: string }
@@ -46,7 +47,6 @@ Respond with a single JSON object and nothing else: {"mode": "lean" | "deep", "r
 export type CouncilOutcome = {
   artifact: DecisionArtifact
   output: string
-  composerOutput?: string
 }
 
 export async function runCouncil(
@@ -59,13 +59,17 @@ export async function runCouncil(
   if (!args.question || args.question.trim().length === 0) {
     throw new Error("council requires a non-empty `question`.")
   }
-  // A pre-aborted run must reject before any router/panel/judge/composer
+  // A pre-aborted run must reject before any router/panel/judge
   // session is created or any model is invoked.
   if (signal.aborted) throw new CancelledError("council cancelled")
 
-  // panel_models tool arg overrides config for this call (explicit wins).
-  const effectiveConfig: CouncilConfig =
-    args.panel_models && args.panel_models.length > 0 ? { ...config, panelModels: args.panel_models } : config
+  // Per-call model args override config (explicit wins).
+  const effectiveConfig: CouncilConfig = {
+    ...config,
+    ...(args.panel_models?.length ? { panelModels: args.panel_models } : {}),
+    ...(args.router_model ? { routerModel: args.router_model } : {}),
+    ...(args.judge_model ? { judgeModel: args.judge_model } : {}),
+  }
 
   // Mode: explicit wins; auto makes exactly one dedicated structured router
   // call, and uncertain/failed routing falls back to lean.
@@ -79,8 +83,8 @@ export async function runCouncil(
     const route = await runRouter({
       client,
       parentID: parentSessionID,
-      model: leanMin.router,
-      supportsVariant: leanMin.router.supportsVariant,
+      model: leanMin.router!,
+      supportsVariant: leanMin.router!.supportsVariant,
       variant: config.variant,
       question: args.question,
       signal,
@@ -99,7 +103,9 @@ export async function runCouncil(
   }
 
   const roleCount = mode === "deep" ? 3 : 2
-  const models = await resolveCouncilModels(client, effectiveConfig, roleCount)
+  // Routing is complete (or was explicitly skipped), so do not validate an
+  // unused router while resolving the panel and judge.
+  const models = await resolveCouncilModels(client, effectiveConfig, roleCount, { router: false })
   const panel = models.panel
   const variant = config.variant
 
@@ -174,32 +180,9 @@ export async function runCouncil(
       : undefined
   artifact.failures = failures.map((f) => `${f.role} (${f.model}): ${f.error}`)
 
-  let composerOutput: string | undefined
-  if (effectiveConfig.composer && models.composer) {
-    try {
-      const composerRes = await runPanelist({
-        client,
-        parentID: parentSessionID,
-        title: `Council — composer (${models.composer.providerID}/${models.composer.modelID})`,
-        system: composerSystemPrompt(),
-        message: renderArtifact(artifact),
-        model: models.composer,
-        supportsVariant: models.composer.supportsVariant,
-        variant,
-        timeoutMs: config.timeoutMs,
-        signal,
-      })
-      composerOutput = composerRes.text
-    } catch (err) {
-      // Composer is optional garnish; failure is disclosed, never fatal.
-      artifact.failures = [...(artifact.failures ?? []), `composer: ${err instanceof Error ? err.message : String(err)}`]
-    }
-  }
-
   return {
     artifact,
-    output: composerOutput ? `${composerOutput}\n\n---\n\n${renderArtifact(artifact)}` : renderArtifact(artifact),
-    composerOutput,
+    output: renderArtifact(artifact),
   }
 }
 

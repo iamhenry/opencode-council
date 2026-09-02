@@ -7,7 +7,6 @@ export const DEFAULT_COUNCIL_PANEL_MODELS = [
 ]
 export const DEFAULT_COUNCIL_ROUTER_MODEL = "ollama-cloud/glm-5.3-flash"
 export const DEFAULT_COUNCIL_JUDGE_MODEL = "openai/gpt-5.6-sol"
-export const DEFAULT_COUNCIL_COMPOSER_MODEL = "openai/gpt-5.6-sol"
 
 export const CouncilConfigSchema = z.object({
   /** Panel models as "provider/model". 2 for lean, 3 for deep. Must be distinct model IDs. */
@@ -20,9 +19,6 @@ export const CouncilConfigSchema = z.object({
   smallModel: z.string().min(1).optional(),
   /** Reasoning variant (e.g. "high"/"medium") sent only to reasoning-capable models. */
   variant: z.string().min(1).optional(),
-  /** Opt-in composer that renders a short prose answer from the artifact. */
-  composer: z.boolean().default(false),
-  composerModel: z.string().min(1).default(DEFAULT_COUNCIL_COMPOSER_MODEL),
   /** Per-stage timeout in ms. Elapsed stage = aborted, counted as failure. */
   timeoutMs: z.number().int().positive().default(180_000),
 })

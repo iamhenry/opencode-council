@@ -49,6 +49,16 @@ export const CouncilPlugin: Plugin = async (input, options) => {
             .describe(
               'Per-call panel model overrides as "provider/model" (2 for lean, 3 for deep). Must be distinct model IDs available from authenticated providers.',
             ),
+          router_model: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Per-call router override as "provider/model". Used only in auto mode.'),
+          judge_model: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Per-call judge override as "provider/model".'),
         },
         execute: async (args, ctx) => {
           const result = await runCouncil(council, config, args as CouncilToolArgs, ctx.sessionID, ctx.abort)

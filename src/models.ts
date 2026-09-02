@@ -15,7 +15,8 @@ export async function resolveCouncilModels(
   client: CouncilClient,
   config: CouncilConfig,
   roleCount: number,
-): Promise<{ panel: ResolvedModel[]; router: ResolvedModel; judge: ResolvedModel; composer?: ResolvedModel }> {
+  options: { router?: boolean } = {},
+): Promise<{ panel: ResolvedModel[]; router?: ResolvedModel; judge: ResolvedModel }> {
   const available = await client.listModels()
   if (available.length === 0) {
     throw new CouncilModelError(
@@ -77,11 +78,8 @@ export async function resolveCouncilModels(
   const judgeRef = config.judgeModel ?? panel[0]!.providerID + "/" + panel[0]!.modelID
   const result = {
     panel,
-    router: resolve(fallback, "router"),
+    router: options.router === false ? undefined : resolve(fallback, "router"),
     judge: resolve(judgeRef, "judge"),
-    composer: config.composer
-      ? resolve(config.composerModel ?? fallback, "composer")
-      : undefined,
   }
   return result
 }

@@ -15,7 +15,6 @@ question ──▶ [auto? router: lean|deep] ──▶ panelists (parallel, inde
 - **auto** (default) — exactly one dedicated structured router call classifies the question; when uncertain (or the router fails), it routes **lean**.
 - The judge selects and weighs **evidence**, attributes it by role, and discloses disagreements, risks, blind spots, and the simplest viable option.
 - If any panelist fails, the council **continues with the survivors** and marks the result `degraded`, disclosing every failure. If all panelists fail, the tool errors with the failure details.
-- Composer (config opt-in) adds a short plain-language prose answer on top.
 
 ## The decision artifact
 
@@ -81,9 +80,7 @@ In `opencode.json` (spec shown as the GitHub form; npm name works identically on
       "panelModels": ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3", "xai/grok-4.6"],
       "routerModel": "ollama-cloud/glm-5.3-flash",
       "judgeModel": "openai/gpt-5.6-sol",
-      "composerModel": "openai/gpt-5.6-sol",
       "variant": "high",
-      "composer": false,
       "timeoutMs": 180000
     }]
   ]
@@ -98,11 +95,9 @@ All options are optional:
 | `routerModel` | GLM 5.3 Flash | Router (auto mode) model. `smallModel` remains an optional custom fallback. |
 | `judgeModel` | Sol 5.6 | Judge may overlap panel models. |
 | `variant` | none | Reasoning variant (e.g. `"high"`) — sent **only** to models reporting reasoning support. |
-| `composer` | `false` | Opt-in prose composer. |
-| `composerModel` | Sol 5.6 | Composer model when enabled. |
 | `timeoutMs` | `180000` | Per-stage timeout (router capped at 60s). |
 
-Precedence is built-in defaults → plugin config → per-call tool overrides. Pass `panel_models` to the tool for a one-off panel.
+Precedence is built-in defaults → plugin config → per-call tool overrides. Pass `panel_models`, `router_model`, or `judge_model` for one call; explicit `lean`/`deep` mode does not resolve or invoke a router.
 
 ## Use
 

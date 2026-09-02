@@ -153,11 +153,3 @@ export function judgeRepairPrompt(invalidOutput: string, error: string): string 
     `Return a corrected decision artifact JSON object that fully satisfies the schema. ${JSON_ONLY}`,
   ].join("\n")
 }
-
-export function composerSystemPrompt(): string {
-  return [
-    NO_MUTATION,
-    ``,
-    `You are the COMPOSER. You receive a council's decision artifact and turn it into a short, plain-language prose answer (max ~150 words) for the person who asked the question. Lead with the recommendation, note the single biggest risk, and end with the next step. No headings, no JSON.`,
-  ].join("\n")
-}

@@ -36,9 +36,6 @@ function isRouterSystem(system: string): boolean {
 function isJudgeSystem(system: string): boolean {
   return system.includes("You are the JUDGE")
 }
-function isComposerSystem(system: string): boolean {
-  return system.includes("You are the COMPOSER")
-}
 
 type MockOptions = {
   models?: AvailableModel[]
@@ -114,9 +111,6 @@ function makeMockClient(opts: MockOptions = {}) {
         const text = opts.judgeText ? opts.judgeText(call) : validArtifactJson()
         return { sessionID: spec.sessionID, text }
       }
-      if (isComposerSystem(spec.system)) {
-        return { sessionID: spec.sessionID, text: "Prose summary of the decision." }
-      }
       // panelist: role is in the session title
       const role = title.includes("Skeptic")
         ? "Skeptic"
@@ -153,7 +147,6 @@ const TEST_MODEL_CONFIG = {
   panelModels: ["p1/alpha", "p1/beta", "p2/gamma"],
   routerModel: "p1/alpha",
   judgeModel: "p1/alpha",
-  composerModel: "p1/alpha",
 }
 const CONFIG = parseConfig({ ...TEST_MODEL_CONFIG, timeoutMs: 2000 })
 
@@ -175,7 +168,6 @@ describe("config", () => {
       panelModels: ["openai/gpt-5.6-sol", "ollama-cloud/kimi-k3", "xai/grok-4.6"],
       routerModel: "ollama-cloud/glm-5.3-flash",
       judgeModel: "openai/gpt-5.6-sol",
-      composerModel: "openai/gpt-5.6-sol",
     })
   })
   it("rejects invalid options with actionable errors", () => {
@@ -225,13 +217,10 @@ describe("model resolution", () => {
       ...TEST_MODEL_CONFIG,
       routerModel: "p2/gamma",
       judgeModel: "p1/beta",
-      composer: true,
-      composerModel: "p2/gamma",
     })
     const resolved = await resolveCouncilModels(mock.client, config, 2)
     expect(resolved.router).toMatchObject({ providerID: "p2", modelID: "gamma" })
     expect(resolved.judge).toMatchObject({ providerID: "p1", modelID: "beta" })
-    expect(resolved.composer).toMatchObject({ providerID: "p2", modelID: "gamma" })
   })
 })
 
@@ -246,6 +235,45 @@ describe("routing", () => {
     await run(mock, { mode: "deep" })
     expect(mock.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(0)
     expect(mock.titles().filter((t) => t.includes("panelist"))).toHaveLength(3)
+  })
+  it("explicit mode does not resolve an unavailable router", async () => {
+    const mock = makeMockClient()
+    const config = parseConfig({ ...TEST_MODEL_CONFIG, routerModel: "p1/unavailable" })
+    const res = await runCouncil(
+      mock.client,
+      config,
+      { question: "q?", mode: "lean" },
+      "parent-1",
+      new AbortController().signal,
+    )
+    expect(res.artifact.mode_used).toBe("lean")
+    expect(mock.promptCalls.filter((c) => isRouterSystem(c.system))).toHaveLength(0)
+  })
+  it("per-call models override panel, router, and judge without changing defaults", async () => {
+    const mock = makeMockClient()
+    await run(mock, {
+      mode: "auto",
+      panel_models: ["p1/beta", "p2/gamma"],
+      router_model: "p2/gamma",
+      judge_model: "p1/beta",
+    })
+    const router = mock.promptCalls.find((c) => isRouterSystem(c.system))!
+    const judge = mock.promptCalls.find((c) => isJudgeSystem(c.system))!
+    const panel = mock.promptCalls.filter((c) => !isRouterSystem(c.system) && !isJudgeSystem(c.system))
+    expect(router.model).toMatchObject({ providerID: "p2", modelID: "gamma" })
+    expect(judge.model).toMatchObject({ providerID: "p1", modelID: "beta" })
+    expect(panel.map((c) => `${c.model.providerID}/${c.model.modelID}`)).toEqual(["p1/beta", "p2/gamma"])
+    expect(CONFIG).toMatchObject(TEST_MODEL_CONFIG)
+  })
+  it("rejects unavailable per-call router and judge models actionably", async () => {
+    const routerMock = makeMockClient()
+    await expect(run(routerMock, { mode: "auto", router_model: "p1/unavailable" })).rejects.toThrow(
+      /router model.*not available/,
+    )
+    const judgeMock = makeMockClient()
+    await expect(run(judgeMock, { mode: "lean", judge_model: "p1/unavailable" })).rejects.toThrow(
+      /judge model.*not available/,
+    )
   })
   it("auto makes exactly one dedicated router call and routes by its output", async () => {
     const mock = makeMockClient({ routerMode: "deep" })
@@ -594,24 +622,5 @@ describe("cancellation and timeouts", () => {
     ).rejects.toThrow(CancelledError)
     expect(mock.titles()).toEqual([])
     expect(mock.promptCalls).toHaveLength(0)
-  })
-})
-
-describe("composer (opt-in)", () => {
-  it("is off by default", async () => {
-    const mock = makeMockClient()
-    const res = await run(mock, { mode: "lean" })
-    expect(res.composerOutput).toBeUndefined()
-    expect(mock.titles().some((t) => t.includes("composer"))).toBe(false)
-  })
-  it("opt-in adds prose and its failure is disclosed, not fatal", async () => {
-    const config = parseConfig({ ...TEST_MODEL_CONFIG, composer: true })
-    const mock = makeMockClient()
-    const res = await runCouncil(mock.client, config, { question: "q?", mode: "lean" }, "parent-1", new AbortController().signal)
-    expect(res.composerOutput).toBe("Prose summary of the decision.")
-    expect(res.output).toContain("Prose summary")
-    const mock2 = makeMockClient({ failSessionTitles: /composer/ })
-    const res2 = await runCouncil(mock2.client, config, { question: "q?", mode: "lean" }, "parent-1", new AbortController().signal)
-    expect(res2.artifact.failures!.some((f) => f.includes("composer"))).toBe(true)
   })
 })
