@@ -13,6 +13,7 @@ import {
   skepticPrompt,
 } from "./prompts.js"
 import type { CouncilClient } from "./opencode.js"
+import { TerminalPromptError } from "./opencode.js"
 
 export type CouncilToolArgs = {
   question: string
@@ -148,7 +149,11 @@ export async function runCouncil(
     }
   })
 
-  if (signal.aborted) throw new CancelledError("council cancelled")
+  if (signal.aborted) throw new CancelledError(`council cancelled. ${failures.map((f) => `${f.role}: ${f.error}`).join("; ")}`)
+
+  if (settled.some((s) => s.status === "rejected" && !(s.reason instanceof TerminalPromptError))) {
+    throw new Error(`Council incomplete — panel execution unconfirmed; judge not started. ${failures.map((f) => `${f.role}: ${f.error}`).join("; ")}`)
+  }
 
   if (responses.length === 0) {
     const detail = failures.map((f) => `${f.role} (${f.model}): ${f.error}`).join("; ")

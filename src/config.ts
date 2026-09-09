@@ -19,7 +19,7 @@ export const CouncilConfigSchema = z.object({
   smallModel: z.string().min(1).optional(),
   /** Reasoning variant (e.g. "high"/"medium") sent only to reasoning-capable models. */
   variant: z.string().min(1).optional(),
-  /** Per-stage timeout in ms. Elapsed stage = aborted, counted as failure. */
+  /** @deprecated Accepted for compatibility; native prompt completion owns waiting. */
   timeoutMs: z.number().int().positive().default(180_000),
 })
 

@@ -3,8 +3,8 @@ import { runCouncil } from "../src/council.js"
 import type { CouncilToolArgs } from "../src/council.js"
 import { resolveCouncilModels, CouncilModelError } from "../src/models.js"
 import { DecisionArtifactSchema, parseArtifact, renderArtifact } from "../src/artifact.js"
-import { DENIED_TOOLS, createSdkCouncilClient } from "../src/opencode.js"
-import { TimeoutError, CancelledError, withTimeout, runPanelist } from "../src/panel.js"
+import { DENIED_TOOLS, createSdkCouncilClient, TerminalPromptError } from "../src/opencode.js"
+import { CancelledError, withCancellation, runPanelist } from "../src/panel.js"
 import { parseConfig, parseModelRef } from "../src/config.js"
 import type { CouncilClient, AvailableModel, PromptSpec, PromptResult } from "../src/opencode.js"
 
@@ -99,7 +99,7 @@ function makeMockClient(opts: MockOptions = {}) {
       }
       if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs))
       if (opts.failSessionTitles?.test(title)) {
-        throw new Error(`mock failure for session "${title}"`)
+        throw new TerminalPromptError(`mock failure for session "${title}"`)
       }
       if (isRouterSystem(spec.system)) {
         return {
@@ -446,8 +446,8 @@ describe("session isolation and permissions", () => {
   })
   it("sdk adapter maps CouncilClient to real session endpoints with the tools map", async () => {
     const sessionCreate = vi.fn(async () => ({ data: { id: "s-1" }, error: undefined }))
-    const sessionPrompt = vi.fn(async () => ({ data: { parts: [{ type: "text", text: "hi" }] }, error: undefined }))
-    const sessionAbort = vi.fn(async () => ({ data: {}, error: undefined }))
+    const sessionPrompt = vi.fn(async () => ({ data: { info: { time: { completed: 1 }, finish: "stop" }, parts: [{ type: "text", text: "hi" }] }, error: undefined }))
+    const sessionAbort = vi.fn(async () => ({ data: true, error: undefined }))
     const providers = vi.fn(async () => ({
       data: { providers: [{ id: "p1", models: { alpha: { capabilities: { reasoning: true } } } }] },
       error: undefined,
@@ -500,6 +500,27 @@ describe("session isolation and permissions", () => {
 })
 
 describe("partial failure and degradation", () => {
+  it.each([
+    [{ time: { completed: 1 }, error: { name: "APIError" } }, TerminalPromptError],
+    [{ time: {}, finish: "stop" }, Error],
+    [{ time: { completed: 1 }, finish: "tool-calls" }, Error],
+  ])("classifies native completion metadata %j", async (info, expected) => {
+    const sdk = { session: { prompt: async () => ({ data: { info, parts: [] } }) } } as unknown as Parameters<typeof createSdkCouncilClient>[0]
+    const client = createSdkCouncilClient(sdk, "/tmp")
+    const error = await client.prompt({ sessionID: "native-1", system: "", message: "", model: { providerID: "p", modelID: "m" }, modelSupportsReasoning: false, tools: DENIED_TOOLS }).catch((err) => err)
+    expect(error.constructor).toBe(expected)
+    expect(error.message).toContain("native-1")
+  })
+  it("blocks the judge on an uncertain transport failure", async () => {
+    const mock = makeMockClient()
+    const prompt = mock.client.prompt
+    mock.client.prompt = async (spec) => {
+      if (mock.sessionTitle(spec.sessionID).includes("Skeptic")) throw new Error(`disconnected ${spec.sessionID}`)
+      return prompt(spec)
+    }
+    await expect(run(mock, { mode: "medium" })).rejects.toThrow(/incomplete.*judge not started/)
+    expect(mock.promptCalls.some((c) => isJudgeSystem(c.system))).toBe(false)
+  })
   it("one failed panelist yields a degraded result with disclosed failure", async () => {
     const mock = makeMockClient({ failSessionTitles: /Skeptic/ })
     const res = await run(mock, { mode: "medium" })
@@ -522,22 +543,24 @@ describe("partial failure and degradation", () => {
 })
 
 describe("cancellation and timeouts", () => {
-  it("timeout aborts the hung session and degrades the result", async () => {
-    const mock = makeMockClient({ hangSessionTitles: /Skeptic/ })
+  it("waits beyond the legacy deadline without aborting or starting the judge early", async () => {
+    const mock = makeMockClient({ delayMs: 100 })
     const config = parseConfig({ ...TEST_MODEL_CONFIG, timeoutMs: 50 })
-    const res = await runCouncil(
+    const pending = runCouncil(
       mock.client,
       config,
       { question: "q?", mode: "medium" },
       "parent-1",
       new AbortController().signal,
     )
-    expect(res.artifact.degradation).toMatch(/degraded/)
-    expect(mock.abortedSessions.length).toBeGreaterThanOrEqual(1)
+    await new Promise((r) => setTimeout(r, 70))
+    expect(mock.promptCalls.some((c) => isJudgeSystem(c.system))).toBe(false)
+    const res = await pending
+    expect(res.artifact.degradation).toBeUndefined()
+    expect(mock.abortedSessions).toEqual([])
     expect(mock.promptCalls.some((c) => mock.sessionTitle(c.sessionID).includes("Skeptic"))).toBe(true)
-    expect(TimeoutError).toBeDefined()
   })
-  it("a hung prompt rejecting after timeout/abort never escapes as unhandledRejection; council still degrades to a terminal artifact", async () => {
+  it("a late rejection after cancellation stays observed and never starts the judge", async () => {
     // Regression: live verifier run (opencode serve 1.18.23) crashed the host
     // with an unhandled TimeoutError when an aborted hung prompt rejected
     // during teardown. The losing race path must stay fully observed.
@@ -547,17 +570,18 @@ describe("cancellation and timeouts", () => {
     try {
       const mock = makeMockClient({ lateRejectSessionTitles: /Skeptic/ })
       const config = parseConfig({ ...TEST_MODEL_CONFIG, timeoutMs: 50 })
-      const res = await runCouncil(
+      const ac = new AbortController()
+      const pending = runCouncil(
         mock.client,
         config,
         { question: "q?", mode: "medium" },
         "parent-1",
-        new AbortController().signal,
+        ac.signal,
       )
-      // Timeout became an ordinary disclosed panel failure; terminal artifact.
-      expect(res.artifact.degradation).toMatch(/degraded: 1 of 3 panelists failed/)
-      expect(res.artifact.failures![0]).toContain("Skeptic")
-      expect(res.artifact.recommendation).toBeTruthy()
+      await new Promise((r) => setTimeout(r, 10))
+      ac.abort()
+      await expect(pending).rejects.toThrow(CancelledError)
+      expect(mock.promptCalls.some((c) => isJudgeSystem(c.system))).toBe(false)
       expect(mock.abortedSessions.length).toBeGreaterThanOrEqual(1)
       // Let the post-abort teardown rejection surface while we watch.
       await new Promise((r) => setTimeout(r, 50))
@@ -594,11 +618,11 @@ describe("cancellation and timeouts", () => {
     expect(mock.promptCalls).toHaveLength(0)
     expect(mock.abortedSessions).toEqual([])
   })
-  it("withTimeout rejects immediately when the signal aborted before the listener is installed", async () => {
+  it("withCancellation rejects immediately when the signal aborted before the listener is installed", async () => {
     const ac = new AbortController()
     ac.abort()
     const started = Date.now()
-    await expect(withTimeout(new Promise((r) => setTimeout(r, 60_000, "x")), 60_000, ac.signal)).rejects.toThrow(
+    await expect(withCancellation(new Promise(() => {}), ac.signal)).rejects.toThrow(
       CancelledError,
     )
     expect(Date.now() - started).toBeLessThan(50)

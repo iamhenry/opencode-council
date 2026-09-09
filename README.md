@@ -24,7 +24,7 @@ Every run returns a validated object containing: `recommendation`, `confidence`,
 
 - All internal sessions **deny** `edit`, `write`, `patch`, `bash`, and `task` — the council never mutates your repo. Only read-only inspection tools (`read`, `grep`, `glob`, `list`, `webfetch`) are enabled.
 - Child sessions are clearly titled (`Council — medium panelist 2 Skeptic (provider/model)`) for audit.
-- Cancellation and per-stage timeouts propagate: timed-out or cancelled panelists are **aborted**, disclosed as failures, and never block the run.
+- Native OpenCode prompt completion owns waiting; there is no Council stage deadline. Confirmed failures are disclosed; uncertain execution blocks the judge. User cancellation requests native child aborts and never starts the judge.
 
 ## Install
 
@@ -95,7 +95,7 @@ All options are optional:
 | `routerModel` | GLM 5.3 Flash | Router (auto mode) model. `smallModel` remains an optional custom fallback. |
 | `judgeModel` | Sol 5.6 | Judge may overlap panel models. |
 | `variant` | none | Reasoning variant (e.g. `"high"`) — sent **only** to models reporting reasoning support. |
-| `timeoutMs` | `180000` | Per-stage timeout (router capped at 60s). |
+| `timeoutMs` | `180000` | Deprecated compatibility setting; ignored by Council. The evaluation harness still uses it for its outer cancellation budget. |
 
 Precedence is built-in defaults → plugin config → per-call tool overrides. Pass `panel_models`, `router_model`, or `judge_model` for one call; explicit `low`/`medium` mode does not resolve or invoke a router.
 

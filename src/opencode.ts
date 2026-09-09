@@ -35,6 +35,9 @@ export type PromptSpec = {
 
 export type PromptResult = { text: string; sessionID: string }
 
+/** Only confirmed native outcomes may be treated as a degraded panel. */
+export class TerminalPromptError extends Error {}
+
 export const DENIED_TOOLS: Record<string, boolean> = {
   edit: false,
   write: false,
@@ -108,24 +111,30 @@ export function createSdkCouncilClient(sdk: SdkClient, directory: string): Counc
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         body: body as any,
         query: { directory },
+      }).catch((cause: unknown) => {
+        throw new Error(`Execution unconfirmed in session ${spec.sessionID}: ${String(cause)}`)
       })
       if (res.error) throw new Error(`Prompt failed in session ${spec.sessionID}: ${JSON.stringify(res.error)}`)
+      const info = res.data?.info
+      if (!info || info.time.completed === undefined) {
+        throw new Error(`Execution unconfirmed in session ${spec.sessionID}`)
+      }
+      if (info.error) throw new TerminalPromptError(`Session ${spec.sessionID}: ${JSON.stringify(info.error)}`)
+      if (!info.finish || info.finish === "tool-calls" || info.finish === "unknown") {
+        throw new Error(`Final response unconfirmed in session ${spec.sessionID}`)
+      }
       const text = (res.data?.parts ?? [])
         .filter((p) => (p as { type: string }).type === "text")
         .map((p) => (p as unknown as { text: string }).text)
         .join("\n")
         .trim()
+      if (!text) throw new TerminalPromptError(`Session ${spec.sessionID}: empty completed response`)
       return { text, sessionID: spec.sessionID }
     },
 
     async abort(sessionID) {
-      // Abort on an already-finished session is harmless; swallow errors so
-      // cleanup never masks the original failure.
-      try {
-        await sdk.session.abort({ path: { id: sessionID }, query: { directory } })
-      } catch {
-        /* already stopped */
-      }
+      const res = await sdk.session.abort({ path: { id: sessionID }, query: { directory } })
+      if (res.error || res.data !== true) throw new Error(`Abort unconfirmed for session ${sessionID}`)
     },
   }
 }
